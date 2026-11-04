@@ -1,0 +1,13 @@
+name: sso
+people: {maria: "María Gómez", tomas: "Tomás Rivera", lucia: "Lucía Pérez", pablo: "Pablo Ruiz"}
+# The hero scenario from SPEC 4.10. after_s is the pause BEFORE each message,
+# relative to the previous one, so the engineering claim lands a few seconds
+# after the sales promise and the candidate appears well inside the 20 s budget.
+messages:
+  - {room: sales, as: maria, after_s: 0, text: "Morning! Big one: confirmed with Acme that SSO will be live for them on December 1."}
+  - {room: support, as: lucia, after_s: 2, text: "Reminder: refunds over $500 still need a manager's OK."}
+  - {room: engineering, as: tomas, after_s: 2, text: "Heads up: we're pulling SSO out of Q4. The auth migration has to land first."}
+  - {room: finance, as: pablo, after_s: 2, text: "Q4 budget review moved to Thursday."}
+decision:            # used by --auto-decide in M5
+  propose: {as: maria, text: "decision: SSO beta for Acme on December 15, GA in Q1. I'll tell Acme today."}
+  confirm: {as: tomas, text: "confirm"}

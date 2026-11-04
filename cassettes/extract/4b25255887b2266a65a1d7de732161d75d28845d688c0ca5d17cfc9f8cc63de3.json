@@ -1,0 +1,27 @@
+{
+  "input": {
+    "author": "lucia",
+    "message_id": "sw_c8af4e39e1b1668308134fb7e601e666",
+    "room": "sales",
+    "text": "The admin console beta is confirmed for December 1."
+  },
+  "model": "deepseek-ai/DeepSeek-V4.1-Flash-1017",
+  "output": {
+    "claims": [
+      {
+        "confidence": 0.9,
+        "effective_date": "2026-12-01",
+        "kind": "commitment",
+        "polarity": "affirm",
+        "scope": "*",
+        "scope_key": "*",
+        "subject": "admin console beta",
+        "subject_key": "admin-console",
+        "value": "beta confirmed for 2026-12-01"
+      }
+    ],
+    "message_id": "sw_c8af4e39e1b1668308134fb7e601e666"
+  },
+  "recorded_at": "2026-11-04T10:50:56+00:00",
+  "task": "extract"
+}

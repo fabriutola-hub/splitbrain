@@ -1,0 +1,27 @@
+{
+  "input": {
+    "author": "lucia",
+    "message_id": "sw_e4b4d8cae1a800d58fdf31efea123447",
+    "room": "support",
+    "text": "Reminder: refunds over $500 still need a manager's OK."
+  },
+  "model": "deepseek-ai/DeepSeek-V4.1-Flash-1017",
+  "output": {
+    "claims": [
+      {
+        "confidence": 0.9,
+        "effective_date": null,
+        "kind": "policy",
+        "polarity": "affirm",
+        "scope": "*",
+        "scope_key": "*",
+        "subject": "refund approval threshold",
+        "subject_key": "refunds",
+        "value": "refunds over $500 require manager approval"
+      }
+    ],
+    "message_id": "sw_e4b4d8cae1a800d58fdf31efea123447"
+  },
+  "recorded_at": "2026-11-04T10:50:14+00:00",
+  "task": "extract"
+}

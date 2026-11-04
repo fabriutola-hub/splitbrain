@@ -281,3 +281,56 @@ of the original `message` event. If the original message was itself a reply, use
   references and no agent key rotation (existing keys are verified through `GET /agents/{id}/ops`).
 - Hackathon rooms (`hackathon-prizes`, `hackathon-judging`) are deliberately not created in M2:
   TASKS.md assigns their template to M7. The user `fabrizio` is created now, as M2 requires.
+
+## Verified in M4 (2026-11-04, live `splitbrain` stack, `SPLITBRAIN_LLM_MODE=record`)
+
+- **`send_targeted_message` with `target_roles=["arbiter"]` works while nobody holds the role.**
+  Verified in a temporary `it-m4-probe-*` room (role defined, zero holders) and in
+  `splitbrain-ops`: it returns `{"event_id": "sw_…", "target_statuses": {}}` and posts the body
+  prefixed with `@arbiter `. So the Sentinel can publish `sb:candidate` in M4, before M5's Arbiter
+  assumes the exclusive lease. The "Not yet verified" item about *delivery to another live agent*
+  still needs M5; room delivery and role-target resolution are now verified.
+- **`read_context(room_id=…, limit=…, connection=False)` works with no stream attached** and returns
+  `{"threads", "truncated", "oldest_timestamp"}`; `threads` is oldest-first, so the tail is freshest.
+  Used for the acceptance reads. `list_rooms(connection=False)` returns the agent's own rooms
+  (the 5 Acme rooms plus two bridged Mattermost defaults) with `room_id, name, connected, archived`.
+  `list_all_rooms(connection=False)` returns a **bare list**; neither call includes `channel_type`
+  (get it from the `message` frame or `get_room_detail`).
+- **Coverage of a `scope=all&filter=all` stream is empty at open.** A fresh `connection_state` on
+  this stack reports `rooms=[]`; each `connect_to_room` emits exactly one `subscription_changed`
+  with `reason="subscription updated"` and a single-element `rooms` list. Claiming the 5 Acme rooms
+  produced 5 such frames. Confirms M1's note: a room created or joined after the stream opens is not
+  covered until it is claimed (or the stream is reopened). M4 claims the demo rooms on
+  `connection_state`, and claims new ids on `subscription_changed`, our own `room_join` or an
+  unknown `room_id` on a message.
+- **`start_from=head` with a new connection id does not replay old messages on process restart.**
+  Nothing from the previous run was redelivered, so `processed_messages` / `pairs_seen` in
+  `.splitbrain/sentinel.db` are the real idempotency guard (re-injecting the 9 old message ids
+  made 0 model calls, 0 posts and left all four table counts unchanged).
+- **rich on Windows**: this machine sets `TERM=dumb`, which makes `rich.live.Live` skip every
+  refresh (only the banner appeared). `Console(force_terminal=True, legacy_windows=False,
+  _environ={TERM: xterm-256color})` fixes it; `legacy_windows=False` is also needed because rich
+  otherwise reserves one column (a `Console(width=120)` renders at 119). Verified 120x32, 30 lines.
+- **Cassette collision**: the extraction cache is keyed by normalized message text, so `record`
+  overwrites an existing cassette when a seed message is byte-identical to an eval line. Two
+  `near-misses` lines matched eval pair `n01` and rewrote those M3 cassettes with live `sw_…`
+  message ids and slightly different `value`s. They were restored from HEAD; `splitbrain eval
+  --mode replay` still reports p=1.000 r=0.889 f1=0.941 because those two claims are rejected by
+  the matcher on scope before classification. Avoid exact eval wording in new seed scenarios.
+- **SPEC §3.3 changed during M4** (orchestrator edit at 06:54): a private-room quote must never be
+  posted in `splitbrain-ops`, in the readable text or in the packet. The Sentinel now substitutes
+  `#room (private), author: quote withheld until the author consents` plus the extracted subject
+  and value, and emits `"text": null, "text_withheld": true` for that claim. **Contradiction to
+  record:** the new note says `splitbrain-ops` is `channel_private` and that "the template sets
+  this", but `templates/splitbrain.template.yaml` still declares `channel_type: channel_public`
+  and the live `get_room_detail` confirms `channel_public`. The template is M2's file and the spec
+  itself says the change only takes effect after `down --wipe && up && bootstrap`; M4 did not wipe
+  the stack or edit the template. **Simplest fix that keeps the product rule:** redact in the
+  Sentinel, so the rule holds even with a public ops room. Raised for the orchestrator.
+- **M5 packet contract**: because `Claim.text` is a non-nullable `str` and `Claim` uses
+  `extra="forbid"`, a raw `sb:candidate` body must NOT be fed straight into
+  `Candidate.model_validate()` — the withheld claim carries `text: null` and `text_withheld: true`.
+  M5 needs a tolerant packet model (or a matching change to `core/models.py`).
+- **No delete operation exists** (by design), so the pre-fix candidate `sb-8126`, which contained
+  the verbatim engineering quote, is still in `splitbrain-ops` history. A `down --wipe` +
+  `bootstrap` clears it before recording the video.

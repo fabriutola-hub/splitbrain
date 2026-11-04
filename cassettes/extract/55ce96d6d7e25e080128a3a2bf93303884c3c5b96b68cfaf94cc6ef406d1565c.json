@@ -1,0 +1,27 @@
+{
+  "input": {
+    "author": "maria",
+    "message_id": "sw_3e2da794d49b34a62812c83057b713b0",
+    "room": "sales",
+    "text": "Morning! Big one: confirmed with Acme that SSO will be live for them on December 1."
+  },
+  "model": "deepseek-ai/DeepSeek-V4.1-Flash-1017",
+  "output": {
+    "claims": [
+      {
+        "confidence": 0.95,
+        "effective_date": null,
+        "kind": "commitment",
+        "polarity": "affirm",
+        "scope": "Acme",
+        "scope_key": "acme",
+        "subject": "SSO",
+        "subject_key": "sso",
+        "value": "live on December 1"
+      }
+    ],
+    "message_id": "sw_3e2da794d49b34a62812c83057b713b0"
+  },
+  "recorded_at": "2026-11-04T10:50:11+00:00",
+  "task": "extract"
+}

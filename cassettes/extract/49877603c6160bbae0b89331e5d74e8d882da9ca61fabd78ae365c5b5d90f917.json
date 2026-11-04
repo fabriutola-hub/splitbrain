@@ -1,0 +1,27 @@
+{
+  "input": {
+    "author": "pablo",
+    "message_id": "sw_c51d4b83f66444e1b2c906eab2645cbe",
+    "room": "finance",
+    "text": "Correction to my earlier note: the Q4 budget review is Friday, not Thursday."
+  },
+  "model": "deepseek-ai/DeepSeek-V4.1-Flash-1017",
+  "output": {
+    "claims": [
+      {
+        "confidence": 0.85,
+        "effective_date": null,
+        "kind": "decision",
+        "polarity": "affirm",
+        "scope": "*",
+        "scope_key": "*",
+        "subject": "Q4 budget review",
+        "subject_key": "q4-budget-review",
+        "value": "Friday"
+      }
+    ],
+    "message_id": "sw_c51d4b83f66444e1b2c906eab2645cbe"
+  },
+  "recorded_at": "2026-11-04T10:50:52+00:00",
+  "task": "extract"
+}

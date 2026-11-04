@@ -1,0 +1,17 @@
+name: near-misses
+people: {maria: "María Gómez", tomas: "Tomás Rivera", lucia: "Lucía Pérez", pablo: "Pablo Ruiz"}
+# Seven messages in four different rooms that LOOK like conflicts but are not.
+#   1-2: same feature (uptime SLA) for two different customers.
+#   3:   a person correcting their own earlier note from the sso scenario.
+#   4-5: compatible values (a December beta and Q1 general availability).
+#   6:   a question, which asserts nothing.
+#   7:   a hypothetical, which decides nothing.
+# None of these may produce a candidate in splitbrain-ops.
+messages:
+  - {room: sales, as: maria, after_s: 0, text: "We committed to a 99.9% uptime SLA for Acme starting in January."}
+  - {room: support, as: lucia, after_s: 2, text: "Globex stays on the standard 99.5% uptime SLA this year."}
+  - {room: finance, as: pablo, after_s: 2, text: "Correction to my earlier note: the Q4 budget review is Friday, not Thursday."}
+  - {room: sales, as: lucia, after_s: 2, text: "The admin console beta is confirmed for December 1."}
+  - {room: engineering, as: tomas, after_s: 2, text: "The admin console general availability is planned for Q1."}
+  - {room: support, as: lucia, after_s: 2, text: "Are we still shipping the admin console beta to Acme in December?"}
+  - {room: finance, as: pablo, after_s: 2, text: "If we delayed the admin console GA to Q2, support load might spike, but nothing has been decided yet."}

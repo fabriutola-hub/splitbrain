@@ -24,8 +24,6 @@ def test_help_lists_every_command(capsys: pytest.CaptureFixture[str]) -> None:
 @pytest.mark.parametrize(
     ("argv", "milestone"),
     [
-        (["run", "sentinel"], "M4"),
-        (["seed", "sso"], "M4"),
         (["demo"], "M7"),
         (["record"], "M7"),
     ],
@@ -34,6 +32,49 @@ def test_stubs_raise_not_implemented(argv: list[str], milestone: str) -> None:
     with pytest.raises(NotImplementedError) as error:
         cli.main(argv)
     assert str(error.value) == milestone
+
+
+def test_run_sentinel_dispatch(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: list[tuple[object, bool]] = []
+
+    async def fake_run(settings: object, *, tui: bool) -> None:
+        calls.append((settings, tui))
+
+    monkeypatch.setattr(cli.sentinel_agent, "run_forever", fake_run)
+    monkeypatch.setattr(cli.Settings, "load", classmethod(lambda cls, **kwargs: "settings-object"))
+    assert cli.main(["run", "sentinel", "--tui"]) == 0
+    assert calls == [("settings-object", True)]
+
+
+def test_run_of_a_m5_agent_fails_loudly(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.setattr(cli.Settings, "load", classmethod(lambda cls, **kwargs: "settings-object"))
+    assert cli.main(["run", "arbiter"]) == 1
+    assert "arrives in M5" in capsys.readouterr().err
+
+
+def test_keyboard_interrupt_exits_gracefully(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    async def interrupted(_args: object) -> int:
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(cli, "_dispatch", interrupted)
+    assert cli.main(["run", "sentinel"]) == 130
+    assert "stopped" in capsys.readouterr().err
+
+
+def test_seed_dispatch(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: list[tuple[object, str, bool]] = []
+
+    async def fake_seed(settings: object, name: str, *, auto_decide: bool) -> None:
+        calls.append((settings, name, auto_decide))
+
+    monkeypatch.setattr(cli.seed, "run", fake_seed)
+    monkeypatch.setattr(cli.Settings, "load", classmethod(lambda cls, **kwargs: "settings-object"))
+    assert cli.main(["seed", "sso"]) == 0
+    assert calls == [("settings-object", "sso", False)]
 
 
 def test_eval_dispatch_does_not_load_switch_settings(

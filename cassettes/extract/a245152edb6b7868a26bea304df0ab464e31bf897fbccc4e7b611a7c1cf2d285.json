@@ -1,0 +1,27 @@
+{
+  "input": {
+    "author": "tomas",
+    "message_id": "sw_f27c9cf564e25d8b03dceb853dc64ebe",
+    "room": "engineering",
+    "text": "The admin console general availability is planned for Q1."
+  },
+  "model": "deepseek-ai/DeepSeek-V4.1-Flash-1017",
+  "output": {
+    "claims": [
+      {
+        "confidence": 0.85,
+        "effective_date": null,
+        "kind": "commitment",
+        "polarity": "affirm",
+        "scope": "*",
+        "scope_key": "*",
+        "subject": "admin console general availability",
+        "subject_key": "admin-console",
+        "value": "planned for Q1"
+      }
+    ],
+    "message_id": "sw_f27c9cf564e25d8b03dceb853dc64ebe"
+  },
+  "recorded_at": "2026-11-04T10:50:56+00:00",
+  "task": "extract"
+}

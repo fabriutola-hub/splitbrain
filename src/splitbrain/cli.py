@@ -7,13 +7,12 @@ import asyncio
 import sys
 from collections.abc import Sequence
 
-from . import bootstrap, evaluation, stack
+from . import bootstrap, evaluation, seed, stack
+from .agents import sentinel as sentinel_agent
 from .config import Settings, SplitbrainError
 
 # Commands that belong to later milestones; they must exist in --help now.
 _STUB_MILESTONES: dict[str, str] = {
-    "run": "M4",
-    "seed": "M4",
     "demo": "M7",
     "record": "M7",
 }
@@ -75,6 +74,15 @@ async def _dispatch(args: argparse.Namespace) -> int:
         await bootstrap.print_status(settings)
     elif args.command == "bootstrap":
         await bootstrap.run(settings)
+    elif args.command == "run":
+        if args.agent != "sentinel":
+            raise SplitbrainError(
+                f"Agent {args.agent!r} arrives in M5; M4 runs the Sentinel only "
+                "('uv run splitbrain run sentinel [--tui]')."
+            )
+        await sentinel_agent.run_forever(settings, tui=args.tui)
+    elif args.command == "seed":
+        await seed.run(settings, args.scenario, auto_decide=args.auto_decide)
     else:
         raise SplitbrainError(f"Unknown command: {args.command}")
     return 0
@@ -84,6 +92,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     try:
         return asyncio.run(_dispatch(args))
+    except (KeyboardInterrupt, asyncio.CancelledError):
+        print("\nsplitbrain: stopped.", file=sys.stderr)
+        return 130
     except SplitbrainError as exc:
         print(f"splitbrain: {exc}", file=sys.stderr)
         return 1

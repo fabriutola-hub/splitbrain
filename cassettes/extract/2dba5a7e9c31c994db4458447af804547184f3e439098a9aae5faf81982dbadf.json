@@ -1,0 +1,27 @@
+{
+  "input": {
+    "author": "pablo",
+    "message_id": "sw_4b9b2e2635397c4b2f2504d40143055d",
+    "room": "finance",
+    "text": "Q4 budget review moved to Thursday."
+  },
+  "model": "deepseek-ai/DeepSeek-V4.1-Flash-1017",
+  "output": {
+    "claims": [
+      {
+        "confidence": 0.85,
+        "effective_date": null,
+        "kind": "decision",
+        "polarity": "affirm",
+        "scope": "*",
+        "scope_key": "*",
+        "subject": "Q4 budget review",
+        "subject_key": "q4-budget-review",
+        "value": "moved to Thursday"
+      }
+    ],
+    "message_id": "sw_4b9b2e2635397c4b2f2504d40143055d"
+  },
+  "recorded_at": "2026-11-04T10:50:19+00:00",
+  "task": "extract"
+}
