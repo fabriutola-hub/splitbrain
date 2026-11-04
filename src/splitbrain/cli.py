@@ -8,7 +8,9 @@ import sys
 from collections.abc import Sequence
 
 from . import bootstrap, evaluation, seed, stack
+from .agents import arbiter as arbiter_agent
 from .agents import sentinel as sentinel_agent
+from .agents import verifier as verifier_agent
 from .config import Settings, SplitbrainError
 
 # Commands that belong to later milestones; they must exist in --help now.
@@ -75,12 +77,19 @@ async def _dispatch(args: argparse.Namespace) -> int:
     elif args.command == "bootstrap":
         await bootstrap.run(settings)
     elif args.command == "run":
-        if args.agent != "sentinel":
+        if args.agent == "sentinel":
+            await sentinel_agent.run_forever(settings, tui=args.tui)
+        elif args.agent == "arbiter":
+            await arbiter_agent.run_forever(settings)
+        elif args.agent == "arbiter-b":
+            await arbiter_agent.run_forever(settings, name="splitbrain-arbiter-b")
+        elif args.agent == "verifier":
+            await verifier_agent.run_forever(settings)
+        else:
             raise SplitbrainError(
-                f"Agent {args.agent!r} arrives in M5; M4 runs the Sentinel only "
-                "('uv run splitbrain run sentinel [--tui]')."
+                "'run all' arrives in M7 with the one-command demo; start the agents in "
+                "separate terminals for now (sentinel, arbiter, arbiter-b, verifier)."
             )
-        await sentinel_agent.run_forever(settings, tui=args.tui)
     elif args.command == "seed":
         await seed.run(settings, args.scenario, auto_decide=args.auto_decide)
     else:

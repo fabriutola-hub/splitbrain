@@ -1,0 +1,160 @@
+{
+  "repo": "https://github.com/fabriutola-hub/splitbrain-demo-roadmap",
+  "captured_at": "2026-11-04T11:44:32+00:00",
+  "issues": [
+    {
+      "number": 5,
+      "title": "Support macros: refunds over $250 now need manager approval",
+      "body": "Finance changed the refund policy on Nov 2: the manager-approval threshold drops from $500 to $250. Update every support macro that still says $500.\n\n_Fictional data for the Splitbrain demo._",
+      "url": "https://github.com/fabriutola-hub/splitbrain-demo-roadmap/issues/5",
+      "state": "open",
+      "milestone": "Q4 2026",
+      "labels": [
+        "documentation"
+      ],
+      "updated_at": "2026-11-04T07:42:38Z",
+      "timeline": [
+        {
+          "event": "milestoned",
+          "milestone": "Q4 2026",
+          "created_at": "2026-11-04T07:42:38Z",
+          "actor": "fabriutola-hub"
+        },
+        {
+          "event": "labeled",
+          "milestone": "",
+          "created_at": "2026-11-04T07:42:40Z",
+          "actor": "fabriutola-hub"
+        }
+      ]
+    },
+    {
+      "number": 4,
+      "title": "Dark mode for the admin console",
+      "body": "Theme toggle in the admin console, following the OS setting by default.\n\n_Fictional data for the Splitbrain demo._",
+      "url": "https://github.com/fabriutola-hub/splitbrain-demo-roadmap/issues/4",
+      "state": "open",
+      "milestone": "Q1 2027",
+      "labels": [
+        "enhancement"
+      ],
+      "updated_at": "2026-11-04T07:42:34Z",
+      "timeline": [
+        {
+          "event": "milestoned",
+          "milestone": "Q1 2027",
+          "created_at": "2026-11-04T07:42:34Z",
+          "actor": "fabriutola-hub"
+        },
+        {
+          "event": "labeled",
+          "milestone": "",
+          "created_at": "2026-11-04T07:42:35Z",
+          "actor": "fabriutola-hub"
+        }
+      ]
+    },
+    {
+      "number": 3,
+      "title": "Audit log export to CSV",
+      "body": "Admins can export the audit log for any date range as CSV.\n\n_Fictional data for the Splitbrain demo._",
+      "url": "https://github.com/fabriutola-hub/splitbrain-demo-roadmap/issues/3",
+      "state": "open",
+      "milestone": "Q4 2026",
+      "labels": [
+        "enhancement"
+      ],
+      "updated_at": "2026-11-04T07:42:30Z",
+      "timeline": [
+        {
+          "event": "milestoned",
+          "milestone": "Q4 2026",
+          "created_at": "2026-11-04T07:42:30Z",
+          "actor": "fabriutola-hub"
+        },
+        {
+          "event": "labeled",
+          "milestone": "",
+          "created_at": "2026-11-04T07:42:32Z",
+          "actor": "fabriutola-hub"
+        }
+      ]
+    },
+    {
+      "number": 2,
+      "title": "SSO (SAML / OIDC) for enterprise customers",
+      "body": "Single sign-on for enterprise workspaces (SAML 2.0 and OIDC).\n\n- Requested by: Acme, Globex\n- Depends on: #1 Auth service migration\n\n_Fictional data for the Splitbrain demo._",
+      "url": "https://github.com/fabriutola-hub/splitbrain-demo-roadmap/issues/2",
+      "state": "open",
+      "milestone": "Q1 2027",
+      "labels": [
+        "enhancement"
+      ],
+      "updated_at": "2026-11-04T07:43:35Z",
+      "timeline": [
+        {
+          "event": "milestoned",
+          "milestone": "Q4 2026",
+          "created_at": "2026-11-04T07:42:26Z",
+          "actor": "fabriutola-hub"
+        },
+        {
+          "event": "labeled",
+          "milestone": "",
+          "created_at": "2026-11-04T07:42:27Z",
+          "actor": "fabriutola-hub"
+        },
+        {
+          "event": "demilestoned",
+          "milestone": "Q4 2026",
+          "created_at": "2026-11-04T07:43:18Z",
+          "actor": "fabriutola-hub"
+        },
+        {
+          "event": "milestoned",
+          "milestone": "Q1 2027",
+          "created_at": "2026-11-04T07:43:18Z",
+          "actor": "fabriutola-hub"
+        },
+        {
+          "event": "commented",
+          "milestone": "",
+          "created_at": "2026-11-04T07:43:35Z",
+          "actor": "fabriutola-hub"
+        }
+      ]
+    },
+    {
+      "number": 1,
+      "title": "Auth service migration to the new identity provider",
+      "body": "Move all login flows to the new identity provider before we add anything on top of auth.\n\n- Owner: Engineering (Tomás)\n- Blocks: SSO for enterprise customers\n\n_Fictional data for the Splitbrain demo._",
+      "url": "https://github.com/fabriutola-hub/splitbrain-demo-roadmap/issues/1",
+      "state": "open",
+      "milestone": "Q4 2026",
+      "labels": [
+        "enhancement"
+      ],
+      "updated_at": "2026-11-04T07:42:22Z",
+      "timeline": [
+        {
+          "event": "milestoned",
+          "milestone": "Q4 2026",
+          "created_at": "2026-11-04T07:42:22Z",
+          "actor": "fabriutola-hub"
+        },
+        {
+          "event": "labeled",
+          "milestone": "",
+          "created_at": "2026-11-04T07:42:23Z",
+          "actor": "fabriutola-hub"
+        },
+        {
+          "event": "cross-referenced",
+          "milestone": "",
+          "created_at": "2026-11-04T07:42:27Z",
+          "actor": "fabriutola-hub"
+        }
+      ]
+    }
+  ]
+}

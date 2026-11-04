@@ -334,3 +334,71 @@ of the original `message` event. If the original message was itself a reply, use
 - **No delete operation exists** (by design), so the pre-fix candidate `sb-8126`, which contained
   the verbatim engineering quote, is still in `splitbrain-ops` history. A `down --wipe` +
   `bootstrap` clears it before recording the video.
+
+## Step 0 / Verified in M5 (2026-11-04, live `splitbrain` stack, clean wipe)
+
+Step 0: `templates/splitbrain.template.yaml` now declares
+`splitbrain-ops: channel_private` (SPEC §3.3). After
+`uv run splitbrain down --wipe && uv run splitbrain up && uv run splitbrain bootstrap`,
+`get_room_detail` reports `splitbrain-ops channel_type=channel_private`, with
+`agent_names` = sentinel, arbiter, verifier, arbiter-b and `connected_user_names=[]`.
+This resolves the contradiction M4 recorded (the §4.1 table still says "public"; the
+product rule in §3.3 wins). No Sentinel-side exception is needed for ops to be private.
+
+- **Exclusive role contention is real.** With two live streams on
+  `splitbrain-arbiter` and `splitbrain-arbiter-b`, `assume_role("arbiter")` succeeded
+  for A and was refused for B with **HTTP 400**
+  `{"detail":"Role 'arbiter' is exclusive and currently held by another agent"}`;
+  `get_room_detail(ops).roles[arbiter].held_by` stayed `['splitbrain-arbiter']`.
+  After A's stream was closed, B's retries kept failing until **6.7 s** after the
+  first refusal — the heartbeat TTL is 6 s — then B's `assume_role` returned 200 and
+  `held_by` became `['splitbrain-arbiter-b']`. `release_role` returns `{"status":"released"}`
+  and clears `held_by`. So the 5 s standby retry is the right interval.
+- **The lease survives room hops.** After A assumed `arbiter` in ops, a
+  `connect_to_room(<other room>)` left `held_by` intact with
+  `{"name":"splitbrain-arbiter","present_here":false,"session_room":"<other room>"}`.
+  The Arbiter can therefore create/claim conflict rooms without losing the lease.
+- **`send_targeted_message` between two live agents works.** Called by the Arbiter in
+  ops with `target_roles=["verifier"]`, it returned
+  `{"event_id":"sw_…","target_statuses":{"splitbrain-verifier":"live"}}`; the Verifier's
+  `scope=all&filter=all` stream received an `event: message` with
+  `payload.addressed=True`, `sender_name="splitbrain-arbiter"` and a body prefixed
+  `@verifier `. `target_names=["splitbrain-sentinel"]` behaves the same way. This closes
+  M4's "delivery to another live agent" question.
+- **`link_rooms` works when the caller is NOT a member of the target room.** Verified
+  from a room created by `splitbrain-arbiter` linking to `sales` and `engineering`:
+  both calls returned 200 with `{target_room_id, target_room_name,
+  target_room_description, label}`. `connect_to_room(conflict).linked_rooms` then lists
+  both entries with the exact labels and `access: "not_member"`. The Arbiter's own
+  `connect_to_room(sales)` is still refused with HTTP 400
+  `{"detail":"Agent is not a member of this room"}` — but linking does not require
+  membership. **Simplest fix that keeps the product rule:** the Arbiter creates the links
+  itself; the `sb:link_request` / `sb:linked` packet fallback to the Sentinel is
+  implemented but was not needed on this server.
+- **`create_room` (live) returns `id`, `name`, `transport_room_id`, `matrix_room_id`,
+  `failed_attachments`** — no `caller_is_member` key from the source docs. With
+  `user_names=["maria","tomas"]` the bridged Mattermost channel appears with exactly
+  those people; `get_room_detail` confirms it. `create_room_document` returns
+  `document_id`, `update_room_document` by the same agent returns
+  `{"document_id":…,"status":"ok"}`, and `connect_to_room(room).documents` lists it.
+- **`connect_to_room` needs a live session even for reads.** Calling it with
+  `connection=False` (no `X-Switch-Connection-Id`) fails with **HTTP 400**
+  `{"detail":"MCP session has no session id; cannot connect to room"}`. Room-agnostic
+  ops (`list_all_rooms`, `get_room_detail`, `read_context(room_id=…)`) work without a
+  stream; reading documents/links needs a short-lived stream that claims the room.
+- **`connect_to_room(ops).references` shape**: a list of
+  `{id,type,name,description,instructions,value:{"urls":[…]}}`. The Verifier reads the
+  repo URL from there, never from chat text. `roles` in the same payload carries
+  `held_by` objects `{name,present_here,session_room}`.
+- **GitHub live evidence**: `GET /search/issues?q=repo:fabriutola-hub/splitbrain-demo-roadmap SSO in:title,body`
+  returns open #2 and #1; `GET /repos/…/issues/2/timeline` returns
+  `milestoned Q4 2026` → `demilestoned Q4 2026` → `milestoned Q1 2027` (all 2026-11-04).
+  `seed/github_fixture.json` is recorded from the same repo with
+  `uv run python scripts/record_github_fixture.py` (5 open issues + timelines).
+- **End-to-end M5 smoke** (`SPLITBRAIN_LLM_MODE=record`, evidence live, four agents):
+  `seed sso` produced candidate `sb-7266` in ops **without** the engineering quote,
+  the Verifier answered with the Q4→Q1 2027 move, the Arbiter posted
+  `sb:verdict confirmed`, asked `sb:consent_request` with a short test timeout, and
+  created `conflict-sb-7266-sso` with maria/tomas, both `origin:` links, the
+  `SB-7266 decision record` (Status: OPEN) and the plain-text brief. Killing the
+  Arbiter made `splitbrain status` report `arbiter role: splitbrain-arbiter-b`.

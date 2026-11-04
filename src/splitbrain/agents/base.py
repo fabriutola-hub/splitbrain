@@ -11,11 +11,12 @@ from __future__ import annotations
 import asyncio
 import logging
 import sys
+from collections.abc import Sequence
 from typing import Protocol
 
 from ..config import LLMSettings
 from ..switch.client import SwitchAgent
-from ..switch.events import SwitchFrame
+from ..switch.events import MessageFrame, SwitchFrame
 
 logger = logging.getLogger(__name__)
 
@@ -60,6 +61,19 @@ def print_banner(name: str, llm: LLMSettings) -> None:
     print("Press Ctrl+C to stop.", flush=True)
 
 
+def print_service_banner(name: str, lines: Sequence[str]) -> None:
+    """Banner for agents that do not call the model (Arbiter, Verifier)."""
+    print(f"Splitbrain {name} starting up", flush=True)
+    for line in lines:
+        print(line, flush=True)
+    print("Press Ctrl+C to stop.", flush=True)
+
+
+def reply_thread(frame: MessageFrame) -> str:
+    """Switch thread ids are the root message id; replies carry that in thread_id."""
+    return frame.payload.thread_id or frame.payload.message_id
+
+
 class AgentRuntime:
     """Owns one SwitchAgent stream, one frame queue and one frame worker."""
 
@@ -69,7 +83,7 @@ class AgentRuntime:
         agent: SwitchAgent,
         processor: FrameProcessor,
         name: str,
-        llm: LLMSettings,
+        llm: LLMSettings | None = None,
         stop: asyncio.Event | None = None,
     ) -> None:
         self.agent = agent

@@ -1,0 +1,27 @@
+{
+  "input": {
+    "author": "lucia",
+    "message_id": "record-1",
+    "room": "support",
+    "text": "Globex remains on its usual 99.5% uptime SLA for the whole of this year."
+  },
+  "model": "deepseek-ai/DeepSeek-V4.1-Flash-1017",
+  "output": {
+    "claims": [
+      {
+        "confidence": 0.9,
+        "effective_date": null,
+        "kind": "status",
+        "polarity": "affirm",
+        "scope": "Globex",
+        "scope_key": "globex",
+        "subject": "uptime SLA",
+        "subject_key": "uptime-sla",
+        "value": "99.5% uptime for the whole of this year"
+      }
+    ],
+    "message_id": "record-1"
+  },
+  "recorded_at": "2026-11-04T11:58:47+00:00",
+  "task": "extract"
+}

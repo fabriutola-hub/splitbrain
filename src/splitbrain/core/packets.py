@@ -21,6 +21,10 @@ PACKET_KINDS = frozenset(
         "consent",
         "decided",
         "corrected",
+        # M5 fallback: the Arbiter may ask the Sentinel (member of every origin
+        # room) to create the room links if Switch refuses its own link_rooms.
+        "link_request",
+        "linked",
     }
 )
 OWN_AGENT_NAMES = frozenset(

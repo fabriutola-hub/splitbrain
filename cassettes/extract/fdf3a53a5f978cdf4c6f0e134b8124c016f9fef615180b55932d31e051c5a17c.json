@@ -1,0 +1,27 @@
+{
+  "input": {
+    "author": "maria",
+    "message_id": "record-0",
+    "room": "sales",
+    "text": "We promised Acme a 99.9% uptime SLA beginning in January, signed off yesterday."
+  },
+  "model": "deepseek-ai/DeepSeek-V4.1-Flash-1017",
+  "output": {
+    "claims": [
+      {
+        "confidence": 0.95,
+        "effective_date": null,
+        "kind": "commitment",
+        "polarity": "affirm",
+        "scope": "Acme",
+        "scope_key": "acme",
+        "subject": "uptime SLA",
+        "subject_key": "uptime-sla",
+        "value": "99.9% uptime beginning in January"
+      }
+    ],
+    "message_id": "record-0"
+  },
+  "recorded_at": "2026-11-04T11:58:47+00:00",
+  "task": "extract"
+}

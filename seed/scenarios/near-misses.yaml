@@ -8,8 +8,11 @@ people: {maria: "María Gómez", tomas: "Tomás Rivera", lucia: "Lucía Pérez",
 #   7:   a hypothetical, which decides nothing.
 # None of these may produce a candidate in splitbrain-ops.
 messages:
-  - {room: sales, as: maria, after_s: 0, text: "We committed to a 99.9% uptime SLA for Acme starting in January."}
-  - {room: support, as: lucia, after_s: 2, text: "Globex stays on the standard 99.5% uptime SLA this year."}
+  # Wording deliberately differs from eval pair n01: the semantic extraction
+  # cache is keyed by normalized message text, so byte-identical seed lines
+  # would overwrite the eval cassettes during a `record` run.
+  - {room: sales, as: maria, after_s: 0, text: "We promised Acme a 99.9% uptime SLA beginning in January, signed off yesterday."}
+  - {room: support, as: lucia, after_s: 2, text: "Globex remains on its usual 99.5% uptime SLA for the whole of this year."}
   - {room: finance, as: pablo, after_s: 2, text: "Correction to my earlier note: the Q4 budget review is Friday, not Thursday."}
   - {room: sales, as: lucia, after_s: 2, text: "The admin console beta is confirmed for December 1."}
   - {room: engineering, as: tomas, after_s: 2, text: "The admin console general availability is planned for Q1."}

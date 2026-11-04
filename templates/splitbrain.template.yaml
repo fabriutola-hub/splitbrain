@@ -48,7 +48,7 @@ rooms:
 
   - name: splitbrain-ops
     description: Splitbrain operations. Candidates, evidence and decisions stay here.
-    channel_type: channel_public
+    channel_type: channel_private
     agents: [splitbrain-sentinel, splitbrain-arbiter, splitbrain-verifier]
     roles:
       - name: arbiter

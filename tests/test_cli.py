@@ -46,12 +46,37 @@ def test_run_sentinel_dispatch(monkeypatch: pytest.MonkeyPatch) -> None:
     assert calls == [("settings-object", True)]
 
 
-def test_run_of_a_m5_agent_fails_loudly(
+@pytest.mark.parametrize(
+    ("argv", "module", "expected_kwargs"),
+    [
+        (["run", "arbiter"], "arbiter_agent", {}),
+        (["run", "arbiter-b"], "arbiter_agent", {"name": "splitbrain-arbiter-b"}),
+        (["run", "verifier"], "verifier_agent", {}),
+    ],
+)
+def test_run_of_a_m5_agent_dispatches(
+    monkeypatch: pytest.MonkeyPatch,
+    argv: list[str],
+    module: str,
+    expected_kwargs: dict[str, str],
+) -> None:
+    calls: list[tuple[object, dict[str, str]]] = []
+
+    async def fake_run(settings: object, **kwargs: str) -> None:
+        calls.append((settings, kwargs))
+
+    monkeypatch.setattr(getattr(cli, module), "run_forever", fake_run)
+    monkeypatch.setattr(cli.Settings, "load", classmethod(lambda cls, **kwargs: "settings-object"))
+    assert cli.main(argv) == 0
+    assert calls == [("settings-object", expected_kwargs)]
+
+
+def test_run_all_is_still_an_m7_stub(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     monkeypatch.setattr(cli.Settings, "load", classmethod(lambda cls, **kwargs: "settings-object"))
-    assert cli.main(["run", "arbiter"]) == 1
-    assert "arrives in M5" in capsys.readouterr().err
+    assert cli.main(["run", "all"]) == 1
+    assert "M7" in capsys.readouterr().err
 
 
 def test_keyboard_interrupt_exits_gracefully(
