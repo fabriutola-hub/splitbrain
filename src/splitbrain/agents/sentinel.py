@@ -11,16 +11,35 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import logging
+import time
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
 
 from .. import bootstrap
 from ..config import LLMSettings, Settings, SplitbrainError
 from ..core.matcher import match_report
-from ..core.models import Candidate, Claim, Message, Relation
+from ..core.models import (
+    Candidate,
+    Claim,
+    ClaimKind,
+    ClaimStatus,
+    Message,
+    Relation,
+    make_claim_id,
+)
 from ..core.packets import encode
 from ..core.pipeline import CANDIDATE_THRESHOLD, Brain
 from ..core.prefilter import prefilter
+from ..core.protocol import (
+    ConsentPacket,
+    ConsentRequestPacket,
+    CorrectedPacket,
+    DecidedPacket,
+    LinkedPacket,
+    LinkRequestPacket,
+    read_packet,
+)
 from ..core.store import ClaimStore, pair_id
 from ..llm.cassette import CassetteStore
 from ..llm.client import LLMClient
@@ -33,7 +52,7 @@ from ..switch.events import (
     SwitchFrame,
 )
 from ..tui import CandidateLink, ClaimView, SentinelTui
-from .base import AgentRuntime, configure_logging, print_banner
+from .base import AgentRuntime, configure_logging, print_banner, reply_thread
 
 logger = logging.getLogger(__name__)
 
@@ -44,6 +63,20 @@ SILENT_ROOMS = frozenset({OPS_ROOM})
 BATCH_SIZE = 8
 BATCH_WINDOW_S = 2.0
 DB_FILENAME = "sentinel.db"
+ARBITER_NAMES = frozenset({"splitbrain-arbiter", "splitbrain-arbiter-b"})
+GRANT_WORDS = frozenset({"yes", "y", "sí", "si", "s", "ok", "okay", "agree", "de acuerdo"})
+DENY_WORDS = frozenset({"no", "n", "nope", "nah"})
+
+
+@dataclass(frozen=True, slots=True)
+class ConsentPending:
+    candidate_id: str
+    claim_id: str
+    author: str
+    room_id: str
+    thread_root: str
+    ops_thread_id: str
+    text: str | None
 
 
 def ignored_source(message: Message) -> str | None:
@@ -103,6 +136,8 @@ class Sentinel:
         self.batch_window_s = batch_window_s
         self.messages_processed = 0
         self.candidates_sent = 0
+        self.consent_pending: dict[tuple[str, str], ConsentPending] = {}
+        self.corrected: set[str] = set()
 
     async def start(self) -> None:
         self.worker = asyncio.create_task(self._extraction_loop(), name="sentinel-extraction")
@@ -207,6 +242,14 @@ class Sentinel:
     # ── Ingestion ────────────────────────────────────────────────────────────
 
     async def _on_message(self, frame: MessageFrame) -> None:
+        # M6: inter-agent packets and consent answers are control traffic, even
+        # when they arrive in a room the detection pipeline would otherwise read.
+        packet = read_packet(frame.payload.body, frame.payload.sender_name)
+        if packet is not None:
+            await self._handle_packet(frame, packet)
+            return
+        if await self._consent_reply(frame):
+            return
         payload = frame.payload
         room_id = frame.room_id
         if room_id not in self.rooms:
@@ -330,6 +373,182 @@ class Sentinel:
             await self.store.mark_processed(message.message_id)
             self.messages_processed += 1
 
+    # ── M6: consent, corrections and the link fallback ──────────────────────
+
+    async def _handle_packet(self, frame: MessageFrame, packet: tuple[str, Any]) -> None:
+        kind, payload = packet
+        if frame.payload.sender_name not in ARBITER_NAMES:
+            return
+        if kind == "consent_request" and isinstance(payload, ConsentRequestPacket):
+            await self._ask_consent(frame, payload)
+        elif kind == "decided" and isinstance(payload, DecidedPacket):
+            await self._apply_corrections(frame, payload)
+        elif kind == "link_request" and isinstance(payload, LinkRequestPacket):
+            await self._answer_link_request(frame, payload)
+
+    async def _ask_consent(self, frame: MessageFrame, request: ConsentRequestPacket) -> None:
+        claim = await self.store.claim_by_id(request.claim_id)
+        room_id = claim.room_id if claim is not None else request.room_id
+        thread_root = (
+            (claim.thread_id or claim.message_id) if claim is not None else request.thread_id
+        )
+        if not room_id or not thread_root:
+            raise SplitbrainError(
+                f"Consent request for unknown claim {request.claim_id}: "
+                "the Sentinel cannot find the original thread."
+            )
+        other = request.other_author or "the other person"
+        question = (
+            f"@{request.author} Splitbrain found that this message conflicts with a "
+            f"statement from another team. May I quote it in a private resolution "
+            f'room with @{other}? Reply "yes" or "no" here.'
+        )
+        await self.agent.post(room_id, question, thread_id=thread_root)
+        self.consent_pending[(room_id, thread_root)] = ConsentPending(
+            candidate_id=request.candidate_id,
+            claim_id=request.claim_id,
+            author=request.author,
+            room_id=room_id,
+            thread_root=thread_root,
+            ops_thread_id=reply_thread(frame),
+            text=claim.text if claim is not None else None,
+        )
+        logger.info(
+            "Asked @%s for consent in #%s thread %s (%s)",
+            request.author,
+            self.rooms.get(room_id, room_id[:8]),
+            thread_root[:12],
+            request.candidate_id,
+        )
+
+    async def _consent_reply(self, frame: MessageFrame) -> bool:
+        payload = frame.payload
+        key = (frame.room_id, payload.thread_id or "")
+        pending = self.consent_pending.get(key)
+        if pending is None or payload.sender_name != pending.author:
+            return False
+        if payload.sender_name.startswith(OWN_AGENT_PREFIX):
+            return False
+        if (payload.sender_kind or "").casefold() == "platform":
+            return False
+        if payload.message_id == pending.thread_root:
+            return False
+        answer = payload.body.strip().casefold().strip(" \t\r\n.!¿?¡")
+        granted = answer in GRANT_WORDS
+        if not granted and answer not in DENY_WORDS:
+            # No private quote is ever revealed without an explicit yes.
+            logger.warning(
+                "Consent answer %r from @%s is not yes/no; treating it as denied",
+                payload.body,
+                payload.sender_name,
+            )
+        del self.consent_pending[key]
+        consent = ConsentPacket(
+            candidate_id=pending.candidate_id,
+            claim_id=pending.claim_id,
+            author=pending.author,
+            granted=granted,
+            text=pending.text if granted else None,
+        )
+        word = "granted" if granted else "denied"
+        readable = (
+            f"Consent {word} by @{pending.author} for claim {pending.claim_id} "
+            f"of {pending.candidate_id.upper()}. "
+            + (
+                "The verbatim quote is attached in the packet for the Arbiter only."
+                if granted
+                else "The quote stays withheld."
+            )
+        )
+        await self.agent.targeted(
+            self.ops_room_id,
+            readable + "\n" + encode("consent", consent),
+            target_roles=["arbiter"],
+            thread_id=pending.ops_thread_id,
+        )
+        logger.info("Consent %s for %s by @%s", word, pending.candidate_id, pending.author)
+        return True
+
+    async def _apply_corrections(self, frame: MessageFrame, decided: DecidedPacket) -> None:
+        if decided.candidate_id in self.corrected:
+            return
+        self.corrected.add(decided.candidate_id)
+        authors = " and ".join(f"@{name}" for name in decided.authors)
+        topic = decided.subject
+        if decided.scope and decided.scope != "*":
+            topic = f"{topic} for {decided.scope}"
+        body = (
+            f"Update: {authors} resolved a conflict about {topic} in "
+            f'#{decided.conflict_room_name}. Decision: "{decided.decision.text}" '
+            "Please use this from now on."
+        )
+        for origin in decided.origins:
+            await self.agent.post(origin.room_id, body, thread_id=origin.thread_id)
+            await self.store.set_status(origin.claim_id, ClaimStatus.RESOLVED)
+        decision = decided.decision
+        await self.store.add_claim(
+            Claim(
+                kind=ClaimKind.DECISION,
+                subject=decided.subject,
+                subject_key=decided.subject_key,
+                scope=decided.scope,
+                scope_key=decided.scope_key,
+                value=decision.text,
+                polarity="affirm",
+                effective_date=None,
+                confidence=1.0,
+                id=make_claim_id(f"decision:{decided.candidate_id}", 0),
+                room_id=decided.conflict_room,
+                room_name=decided.conflict_room_name,
+                channel_type="channel_public",
+                message_id=f"decision:{decided.candidate_id}",
+                thread_id=None,
+                author=decision.proposed_by,
+                ts=int(time.time() * 1000),
+                text=decision.text,
+                status=ClaimStatus.ACTIVE,
+            )
+        )
+        rooms = [f"#{origin.room_name}" for origin in decided.origins]
+        packet = CorrectedPacket(
+            candidate_id=decided.candidate_id,
+            conflict_room=decided.conflict_room,
+            conflict_room_name=decided.conflict_room_name,
+            rooms=[origin.room_name for origin in decided.origins],
+        )
+        await self.agent.targeted(
+            self.ops_room_id,
+            f"Corrections posted in {', '.join(rooms)} for {decided.candidate_id.upper()}.\n"
+            + encode("corrected", packet),
+            target_roles=["arbiter"],
+            thread_id=reply_thread(frame),
+        )
+        logger.info("Corrections posted in %s for %s", ", ".join(rooms), decided.candidate_id)
+
+    async def _answer_link_request(self, frame: MessageFrame, request: LinkRequestPacket) -> None:
+        labels: list[str] = []
+        for target in request.origins:
+            await self.agent.op(
+                "link_rooms",
+                source_room_id=request.conflict_room_id,
+                target_room_id=target.room_id,
+                label=target.label,
+            )
+            labels.append(target.label)
+        packet = LinkedPacket(
+            candidate_id=request.candidate_id,
+            conflict_room_id=request.conflict_room_id,
+            labels=labels,
+        )
+        await self.agent.targeted(
+            self.ops_room_id,
+            f"Sentinel created the room links for {request.candidate_id.upper()}: "
+            f"{', '.join(labels)}.\n" + encode("linked", packet),
+            target_roles=["arbiter"],
+            thread_id=reply_thread(frame),
+        )
+        logger.info("Sentinel created %d link(s) for %s", len(labels), request.candidate_id)
+
     # ── Publishing (M4 rule 3: silence by default) ──────────────────────────
 
     async def _publish(self, candidate: Candidate) -> None:
@@ -425,7 +644,12 @@ class Sentinel:
         )
 
 
-def build_runtime(settings: Settings, *, tui_enabled: bool = False) -> AgentRuntime:
+def build_runtime(
+    settings: Settings,
+    *,
+    tui_enabled: bool = False,
+    stop: asyncio.Event | None = None,
+) -> AgentRuntime:
     """Wire the M3 brain and the M1 protocol client into one foreground agent."""
     state = bootstrap.load_state(settings)
     credentials = state.agents.get(AGENT_NAME)
@@ -449,7 +673,9 @@ def build_runtime(settings: Settings, *, tui_enabled: bool = False) -> AgentRunt
 
     agent = SwitchAgent(settings.api_base_url, credentials.agent_id, credentials.api_key)
     sentinel = Sentinel(agent=agent, llm=llm, store=store, state=state, tui=view)
-    return AgentRuntime(agent=agent, processor=sentinel, name=AGENT_NAME, llm=llm_settings)
+    return AgentRuntime(
+        agent=agent, processor=sentinel, name=AGENT_NAME, llm=llm_settings, stop=stop
+    )
 
 
 async def run_forever(settings: Settings, *, tui: bool = False) -> None:

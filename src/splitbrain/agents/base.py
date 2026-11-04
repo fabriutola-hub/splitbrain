@@ -112,21 +112,30 @@ class AgentRuntime:
                 self.frames.task_done()
 
     async def serve(self) -> None:
-        """Run until Ctrl+C; always release every resource in the finally block."""
+        """Run until Ctrl+C or stop; always release every resource in the end.
+
+        The SSE read loop can sit idle between keepalives without noticing a
+        stop flag, so wait on the stop event and the stream together instead of
+        awaiting the stream task alone.
+        """
         await self.processor.start()
         consumer = asyncio.create_task(self._consume(), name=f"{self.name}-worker")
         stream = asyncio.create_task(
             self.agent.run(self._enqueue, stop=self.stop), name=f"{self.name}-stream"
         )
+        stop_waiter = asyncio.create_task(self.stop.wait(), name=f"{self.name}-stop")
         try:
-            await stream
+            done, _ = await asyncio.wait({stream, stop_waiter}, return_when=asyncio.FIRST_COMPLETED)
+            if stream in done:
+                await stream
         except KeyboardInterrupt:
             logger.info("Ctrl+C received; stopping %s", self.name)
         finally:
             self.stop.set()
             stream.cancel()
             consumer.cancel()
-            await asyncio.gather(stream, consumer, return_exceptions=True)
+            stop_waiter.cancel()
+            await asyncio.gather(stream, consumer, stop_waiter, return_exceptions=True)
             try:
                 await self.processor.aclose()
             finally:

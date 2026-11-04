@@ -154,6 +154,13 @@ class MattermostUser:
         thread = Thread.model_validate(response.json())
         return [thread.posts[pid] for pid in thread.order if pid in thread.posts]
 
+    async def channel_posts(self, channel_id: str) -> list[Post]:
+        """Recent top-level posts in a channel, oldest first."""
+        response = await self._client.get(f"{self.base_url}{API}/channels/{channel_id}/posts")
+        self._check("channels/posts", response)
+        thread = Thread.model_validate(response.json())
+        return [thread.posts[pid] for pid in thread.order if pid in thread.posts]
+
 
 class MattermostAdmin:
     def __init__(

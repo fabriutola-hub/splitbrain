@@ -1,7 +1,7 @@
 {
   "input": {
     "author": "tomas",
-    "message_id": "sw_0800ef9425624bf19c15429ef8d3d8a5",
+    "message_id": "sw_9353d28f7356d73a0727e7291e8bc704",
     "room": "engineering",
     "text": "Heads up: we're pulling SSO out of Q4. The auth migration has to land first."
   },
@@ -20,8 +20,8 @@
         "value": "removed from Q4 delivery"
       }
     ],
-    "message_id": "sw_0800ef9425624bf19c15429ef8d3d8a5"
+    "message_id": "sw_9353d28f7356d73a0727e7291e8bc704"
   },
-  "recorded_at": "2026-11-04T11:52:00+00:00",
+  "recorded_at": "2026-11-04T12:24:11+00:00",
   "task": "extract"
 }

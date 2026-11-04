@@ -125,6 +125,32 @@ async def test_cancellation_still_closes_every_resource(monkeypatch: Any, tmp_pa
     assert runtime.stop.is_set()
 
 
+async def test_setting_stop_while_the_stream_is_idle_shuts_down(
+    monkeypatch: Any, tmp_path: Any
+) -> None:
+    """An idle SSE loop only sees keepalives, so serve() must watch stop itself."""
+    done = asyncio.Event()
+    processor = StubProcessor(done, count=99)
+    agent = StubAgent([], done)
+
+    async def idle_forever(handler: Any, *, stop: asyncio.Event | None = None) -> None:
+        await asyncio.sleep(60)
+
+    agent.run = idle_forever  # type: ignore[method-assign]
+    runtime = AgentRuntime(
+        agent=agent,  # type: ignore[arg-type]
+        processor=processor,
+        name="test-agent",
+        llm=_llm(monkeypatch, tmp_path),
+    )
+    task = asyncio.create_task(runtime.serve())
+    await asyncio.sleep(0.05)
+    runtime.stop.set()
+    await asyncio.wait_for(task, timeout=2.0)
+    assert processor.closed is True
+    assert agent.closed is True
+
+
 def test_print_banner_states_mode_without_the_key(
     capsys: Any, monkeypatch: Any, tmp_path: Any
 ) -> None:

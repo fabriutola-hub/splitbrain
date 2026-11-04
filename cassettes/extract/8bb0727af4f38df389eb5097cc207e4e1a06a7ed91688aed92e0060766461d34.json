@@ -1,7 +1,7 @@
 {
   "input": {
     "author": "lucia",
-    "message_id": "sw_d2690db6178470cca312099280dd0a02",
+    "message_id": "sw_a8f67c984cda1e8a51fb178031a88542",
     "room": "support",
     "text": "Reminder: refunds over $500 still need a manager's OK."
   },
@@ -20,8 +20,8 @@
         "value": "refunds over $500 require manager approval"
       }
     ],
-    "message_id": "sw_d2690db6178470cca312099280dd0a02"
+    "message_id": "sw_a8f67c984cda1e8a51fb178031a88542"
   },
-  "recorded_at": "2026-11-04T11:52:00+00:00",
+  "recorded_at": "2026-11-04T12:24:11+00:00",
   "task": "extract"
 }

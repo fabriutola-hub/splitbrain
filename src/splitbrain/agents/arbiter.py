@@ -335,8 +335,10 @@ class Arbiter:
         elif kind == "linked" and isinstance(payload, LinkedPacket):
             self._on_linked(payload)
         elif kind == "corrected" and isinstance(payload, CorrectedPacket):
-            # M6 closes the loop; the M5 Arbiter only records that it arrived.
-            logger.debug("sb:corrected for %s (handled from M6)", payload.candidate_id)
+            if frame.payload.sender_name == SENTINEL_NAME:
+                await self._on_corrected(payload)
+            else:
+                logger.warning("Ignoring sb:corrected from %s", frame.payload.sender_name)
 
     async def _on_candidate(self, frame: MessageFrame, candidate: CandidatePacket) -> None:
         if frame.room_id != self.ops_room_id:
@@ -746,6 +748,29 @@ class Arbiter:
             verification.room_name,
             decision.text,
         )
+
+    async def _on_corrected(self, packet: CorrectedPacket) -> None:
+        """M6 closing beat: append the final line and confirm in the conflict room."""
+        verification = self.verifications.get(packet.candidate_id)
+        if (
+            verification is None
+            or verification.room_id is None
+            or verification.corrected
+            or not verification.decided
+        ):
+            return
+        verification.corrected = True
+        rooms = ", ".join(f"#{room}" for room in packet.rooms) or "both original threads"
+        line = f"Corrections posted in {rooms}"
+        verification.record += f"\n\n{line}"
+        async with self.agent.act_in(verification.room_id):
+            await self.agent.op(
+                "update_room_document",
+                document_id=verification.document_id,
+                content=verification.record,
+            )
+        await self.agent.post(verification.room_id, f"{line}.")
+        logger.info("%s for %s", line, packet.candidate_id)
 
 
 def build_runtime(

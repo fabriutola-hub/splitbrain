@@ -75,6 +75,17 @@ class ClaimStore:
             result.append(claim.model_copy(update={"status": ClaimStatus(row["status"])}))
         return result
 
+    def _claim_by_id(self, claim_id: str) -> Claim | None:
+        with self._lock:
+            row = self._connection.execute(
+                "SELECT payload, status FROM claims WHERE id = ?", (claim_id,)
+            ).fetchone()
+        if row is None:
+            return None
+        return Claim.model_validate_json(row["payload"]).model_copy(
+            update={"status": ClaimStatus(row["status"])}
+        )
+
     def _set_status(self, claim_id: str, status: ClaimStatus) -> None:
         with self._lock:
             row = self._connection.execute(
@@ -136,6 +147,9 @@ class ClaimStore:
 
     async def active_claims(self) -> list[Claim]:
         return await self._run(self._active_claims)
+
+    async def claim_by_id(self, claim_id: str) -> Claim | None:
+        return await self._run(self._claim_by_id, claim_id)
 
     async def set_status(self, claim_id: str, status: ClaimStatus) -> None:
         await self._run(self._set_status, claim_id, status)

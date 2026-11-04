@@ -135,3 +135,56 @@ def test_consent_timeout_fills_missing_answers_as_denied() -> None:
     mod.Arbiter._fill_missing_consents(item)
     assert item.consents["clm_tomas"].granted is False
     assert item.consents["clm_tomas"].text is None
+
+
+async def test_corrected_appends_the_final_line_and_confirms_in_the_room() -> None:
+    from contextlib import asynccontextmanager
+
+    from splitbrain.core.protocol import CorrectedPacket
+
+    class FakeAgent:
+        def __init__(self) -> None:
+            self.updates: list[dict] = []
+            self.posts: list[tuple[str, str]] = []
+
+        @asynccontextmanager
+        async def act_in(self, room_id: str):
+            yield self
+
+        async def op(self, name: str, /, **args) -> dict:
+            self.updates.append({"name": name, **args})
+            return {}
+
+        async def post(self, room_id: str, body: str, **kwargs) -> dict:
+            self.posts.append((room_id, body))
+            return {}
+
+    arbiter = make_arbiter()
+    item = verification(granted=True)
+    item.room_id = "r-conflict"
+    item.room_name = "conflict-sb-0001-sso"
+    item.document_id = "doc-1"
+    item.record = "Status: DECIDED\nDecision: SSO in Q1"
+    item.decided = True
+    arbiter.verifications[item.candidate.id] = item
+    fake = FakeAgent()
+    arbiter.agent = fake  # type: ignore[assignment]
+
+    packet = CorrectedPacket(
+        candidate_id="sb-0001",
+        conflict_room="r-conflict",
+        conflict_room_name="conflict-sb-0001-sso",
+        rooms=["sales", "engineering"],
+    )
+    await arbiter._on_corrected(packet)
+    assert item.corrected is True
+    assert "Corrections posted in #sales, #engineering" in item.record
+    assert fake.updates[-1]["name"] == "update_room_document"
+    assert "Corrections posted in #sales, #engineering" in fake.updates[-1]["content"]
+    assert fake.posts[-1] == (
+        "r-conflict",
+        "Corrections posted in #sales, #engineering.",
+    )
+    # A duplicate packet must not append the line twice.
+    await arbiter._on_corrected(packet)
+    assert item.record.count("Corrections posted") == 1

@@ -62,7 +62,43 @@ def test_path_traversal_is_rejected() -> None:
         seed.load_scenario(settings(), "../../etc/passwd")
 
 
-async def test_auto_decide_fails_loudly_in_m4(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(seed, "load_scenario", lambda _settings, _name: None)
-    with pytest.raises(SplitbrainError, match="M5"):
+async def test_auto_decide_without_a_decision_block_fails_loudly(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    scenario = seed.Scenario(
+        name="sso",
+        people={"maria": "Maria"},
+        messages=[seed.SeedMessage(room="sales", **{"as": "maria"}, text="SSO on Dec 1")],
+    )
+    monkeypatch.setattr(seed, "load_scenario", lambda _settings, _name: scenario)
+    with pytest.raises(SplitbrainError, match="no 'decision:' block"):
         await seed.run(settings(), "sso", auto_decide=True)
+
+
+async def test_wait_for_says_what_it_expected() -> None:
+    async def nothing() -> None:
+        return None
+
+    with pytest.raises(SplitbrainError) as error:
+        await seed._wait_for("the consent question in #engineering thread sw_1", 0.01, nothing)
+    assert "the consent question in #engineering thread sw_1" in str(error.value)
+    assert "Timed out after" in str(error.value)
+    assert "sentinel, arbiter, verifier" in str(error.value)
+
+
+def test_conflict_room_names_are_filtered_from_both_registry_shapes() -> None:
+    import asyncio
+
+    class FakeAgent:
+        def __init__(self, payload: object) -> None:
+            self.payload = payload
+
+        async def op(self, name: str, /, **kwargs: object) -> object:
+            return self.payload
+
+    bare = [
+        {"name": "sales", "room_id": "1"},
+        {"name": "conflict-sb-0001-sso", "room_id": "2"},
+    ]
+    assert asyncio.run(seed._conflict_rooms(FakeAgent(bare))) == {"conflict-sb-0001-sso"}
+    assert asyncio.run(seed._conflict_rooms(FakeAgent({"rooms": bare}))) == {"conflict-sb-0001-sso"}

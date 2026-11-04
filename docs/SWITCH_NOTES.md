@@ -402,3 +402,67 @@ product rule in §3.3 wins). No Sentinel-side exception is needed for ops to be 
   created `conflict-sb-7266-sso` with maria/tomas, both `origin:` links, the
   `SB-7266 decision record` (Status: OPEN) and the plain-text brief. Killing the
   Arbiter made `splitbrain status` report `arbiter role: splitbrain-arbiter-b`.
+
+## Verified in M6 (2026-11-04, live `splitbrain` stack, `SPLITBRAIN_LLM_MODE=record`)
+
+- **Consent works in the author's own thread.** `send_targeted_message` with
+  `target_names=["splitbrain-sentinel"]` delivers `sb:consent_request` (verified
+  M5). The Sentinel replies with `post_message(thread_id=<root Switch message id>)`
+  in `#engineering`; Mattermost shows it as reply [2] of
+  `GET /api/v4/posts/{root}/thread`. The seed's "yes" arrives on the Switch stream
+  as a `message` frame whose `payload.thread_id` equals that same root id and
+  whose `sender_name` is the Mattermost username, so matching on
+  `(room_id, thread_id, author)` is exact. The Sentinel's own question in that
+  thread is ignored (different sender); only the next reply by that author decides.
+- **`sb:consent` carries the verbatim quote only when granted.** Readable ops text
+  says "Consent granted ... The verbatim quote is attached in the packet"; the
+  private quote appears only inside the packet JSON, never in `sb:candidate` and
+  never in the conflict room before consent. `splitbrain-ops` is itself
+  `channel_private` after Step 0.
+- **Two links, brief and record verified through the API.** `connect_to_room(conflict).linked_rooms`
+  returned exactly `origin: #sales (maria)` and `origin: #engineering (tomas)`;
+  `get_room_detail` returned `people=['maria','tomas']`,
+  `agents=['splitbrain-arbiter','splitbrain-sentinel']`. The brief quotes both
+  claims and the evidence; `load_internal_documents` shows `Status: DECIDED`,
+  the decision text, proposer/confirmer, and the final line
+  `Corrections posted in #sales, #engineering`.
+- **Corrections are thread replies.** `GET /api/v4/posts/{id}/thread` for the
+  sales root returned `[original, "Update: @maria and @tomas resolved ..."]`; the
+  engineering root returned `[original, consent question, "yes", correction]`.
+  No correction is a top-level post in a team room.
+- **`seed sso --auto-decide` closed the loop in one command**: it found the consent
+  question, answered "yes" as tomas, waited for `conflict-sb-7552-sso`, posted
+  `decision: ...` as maria and `confirm` as tomas, then waited for the Arbiter's
+  `Corrections posted in #sales, #engineering.` confirmation.
+- **`seed near-misses` reaches nobody.** After it ran, `read_context(ops)` still
+  held exactly the same 4 `sb:candidate` packets (all from SSO runs), no new
+  `sb:consent_request` / `sb:decided`, and no new conflict room. The Sentinel log
+  shows `No alert: compatible (confidence 0.90): A December beta and Q1 general
+  availability are two phases of one rollout` and `Extracted 0 claim(s)` for the
+  question and the hypothetical.
+- **Failover**: killing the Arbiter produced `arbiter role: unheld` at t+2s and
+  `arbiter role: splitbrain-arbiter-b` at t+4s via `splitbrain status`.
+- **Live evidence vs fixture**: the acceptance run used
+  `SPLITBRAIN_EVIDENCE_MODE=live` (GitHub REST, issue #2 Q4 2026 → Q1 2027 on
+  Nov 4). The end-to-end integration test used `fixture`, which printed the exact
+  banner `EVIDENCE: fixture (recorded GitHub data)` and produced the same summary.
+  A live network failure raises `SplitbrainEvidenceError` with a message naming
+  the repo, the failure and `SPLITBRAIN_EVIDENCE_MODE=fixture`; it never falls back
+  silently.
+- **Runtime-state caveat (repeat runs).** Claims stay `active` in
+  `.splitbrain/sentinel.db`, so re-seeding `sso` without a wipe can pair a new
+  message with an old active claim and create a second candidate whose correction
+  lands in the previous run's thread. That is expected for a persistent store,
+  not a Switch behaviour. `splitbrain down --wipe` clears it for the demo, and the
+  end-to-end integration test isolates itself by pointing `sentinel.DB_FILENAME`
+  at a fresh per-run database.
+- **`AgentRuntime.serve` needed a stop watcher.** With a `scope=all` stream idle
+  between 15 s keepalives, `await stream` never noticed a set `stop` event
+  (`_stream_once` only checks `stop` when a parsed frame arrives). `serve()` now
+  waits on the stream task *and* `stop.wait()` with `FIRST_COMPLETED`, then cancels
+  the stream. Without this, in-process agents hung the integration suite on
+  shutdown; with it, `pytest -m integration -q` finishes in ~25 s.
+- **Cassette hygiene**: the two `near-misses` lines that were byte-identical to
+  eval pair `n01` were reworded. After all `record` runs, none of the 11 changed
+  extraction cassettes holds text from `eval/dataset.jsonl`; the three changed
+  classification cassettes differ only in `recorded_at`.

@@ -20,3 +20,23 @@ The command is offline by default: it replays the committed semantic cassettes i
 `SPLITBRAIN_LLM_MODE=record uv run splitbrain eval`. A replay with no cassette
 raises `ReplayMiss` with the exact input and the command to fix it. Record and
 replay produce identical metrics without any network call in replay.
+
+## Degraded modes (always announced on stdout)
+
+- **Model replay** (`SPLITBRAIN_LLM_MODE=replay`, the default with no API key):
+  banner `[DEGRADED] replay: recorded model responses only, no network calls.`
+  No internet is used; a missing cassette raises `ReplayMiss`. `record` mode
+  re-records the semantic cassettes under `cassettes/`.
+- **GitHub fixture** (`SPLITBRAIN_EVIDENCE_MODE=fixture`): banner
+  `EVIDENCE: fixture (recorded GitHub data)`. The Verifier reads
+  `seed/github_fixture.json`, captured from the public demo repo with
+  `uv run python scripts/record_github_fixture.py`.
+- **Live evidence** (default, `SPLITBRAIN_EVIDENCE_MODE=live`): banner
+  `EVIDENCE: live (GitHub REST, <repo>)`. The repo URL comes from the GitHub
+  reference attached to `splitbrain-ops`. A network error fails with a clear
+  message; it never falls back to the fixture silently. `GITHUB_TOKEN` is used
+  when set.
+
+Both replay and fixture are declared here and printed at startup, so a demo or a
+clone can run without keys or internet without anyone mistaking recorded data for
+a live answer.

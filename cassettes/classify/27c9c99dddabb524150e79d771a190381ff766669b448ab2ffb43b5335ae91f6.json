@@ -33,6 +33,6 @@
     "reason": "Engineering removed SSO from Q4 delivery while sales committed Acme to SSO going live on December 1, which falls in Q4.",
     "relation": "contradiction"
   },
-  "recorded_at": "2026-11-04T11:52:01+00:00",
+  "recorded_at": "2026-11-04T12:11:11+00:00",
   "task": "classify"
 }

@@ -1,7 +1,7 @@
 {
   "input": {
     "author": "tomas",
-    "message_id": "sw_f27c9cf564e25d8b03dceb853dc64ebe",
+    "message_id": "sw_a5a7558b94561b7637df431242eeb8fc",
     "room": "engineering",
     "text": "The admin console general availability is planned for Q1."
   },
@@ -20,8 +20,8 @@
         "value": "planned for Q1"
       }
     ],
-    "message_id": "sw_f27c9cf564e25d8b03dceb853dc64ebe"
+    "message_id": "sw_a5a7558b94561b7637df431242eeb8fc"
   },
-  "recorded_at": "2026-11-04T10:50:56+00:00",
+  "recorded_at": "2026-11-04T12:25:16+00:00",
   "task": "extract"
 }

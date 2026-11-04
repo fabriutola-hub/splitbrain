@@ -1,7 +1,7 @@
 {
   "input": {
     "author": "lucia",
-    "message_id": "sw_c8af4e39e1b1668308134fb7e601e666",
+    "message_id": "sw_558b33fea2b05297a94d4c1955d4aa30",
     "room": "sales",
     "text": "The admin console beta is confirmed for December 1."
   },
@@ -20,8 +20,8 @@
         "value": "beta confirmed for 2026-12-01"
       }
     ],
-    "message_id": "sw_c8af4e39e1b1668308134fb7e601e666"
+    "message_id": "sw_558b33fea2b05297a94d4c1955d4aa30"
   },
-  "recorded_at": "2026-11-04T10:50:56+00:00",
+  "recorded_at": "2026-11-04T12:25:16+00:00",
   "task": "extract"
 }
