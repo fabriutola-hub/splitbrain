@@ -133,6 +133,20 @@ async def test_op_returns_result_and_sends_the_connection_header() -> None:
 
 
 @respx.mock
+async def test_op_can_omit_the_connection_header() -> None:
+    agent = SwitchAgent(BASE, AGENT_ID, API_KEY, connection_id="fixed-conn")
+    route = respx.post(f"{BASE}/agents/{AGENT_ID}/ops/get_room_detail").mock(
+        return_value=httpx.Response(200, json={"result": {"name": "room"}})
+    )
+    try:
+        assert await agent.op("get_room_detail", room_id="r1", connection=False) == {"name": "room"}
+        assert "x-switch-connection-id" not in route.calls[0].request.headers
+        assert json.loads(route.calls[0].request.content) == {"room_id": "r1"}
+    finally:
+        await agent.aclose()
+
+
+@respx.mock
 async def test_op_error_has_op_status_body_and_no_secret() -> None:
     agent = SwitchAgent(BASE, AGENT_ID, API_KEY)
     respx.post(f"{BASE}/agents/{AGENT_ID}/ops/create_room").mock(

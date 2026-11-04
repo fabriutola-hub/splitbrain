@@ -150,6 +150,42 @@ async def test_post_reply_and_read_thread() -> None:
 
 
 @respx.mock
+async def test_ensure_user_repairs_a_lost_password() -> None:
+    respx.post(f"{BASE}{API}/users/login").mock(
+        side_effect=[
+            httpx.Response(200, json={"id": "admin-id"}, headers={"Token": "admin-token"}),
+            httpx.Response(401, json={"message": "invalid credentials"}),
+            httpx.Response(200, json={"id": "user-id"}, headers={"Token": "user-token"}),
+        ]
+    )
+    respx.get(f"{BASE}{API}/teams/name/switch").mock(
+        return_value=httpx.Response(200, json={"id": TEAM_ID})
+    )
+    respx.get(f"{BASE}{API}/users/username/{USER}").mock(
+        return_value=httpx.Response(200, json={"id": "user-id", "username": USER})
+    )
+    respx.post(f"{BASE}{API}/teams/{TEAM_ID}/members").mock(
+        return_value=httpx.Response(409, json={})
+    )
+    password_route = respx.put(f"{BASE}{API}/users/user-id/password").mock(
+        return_value=httpx.Response(200, json={})
+    )
+
+    admin = MattermostAdmin(BASE, ADMIN, ADMIN_PASSWORD)
+    user = None
+    try:
+        await admin.login()
+        user = await admin.ensure_user(USER, USER_PASSWORD)
+        assert user.username == USER
+    finally:
+        if user is not None:
+            await user.aclose()
+        await admin.aclose()
+    assert password_route.called
+    assert json.loads(password_route.calls[0].request.content) == {"new_password": USER_PASSWORD}
+
+
+@respx.mock
 async def test_login_error_redacts_the_password() -> None:
     respx.post(f"{BASE}{API}/users/login").mock(
         return_value=httpx.Response(401, text=f"bad password {USER_PASSWORD}")

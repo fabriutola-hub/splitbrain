@@ -137,8 +137,12 @@ class SwitchAgent:
         return {"Authorization": f"Bearer {self._api_key}"}
 
     # `name` is positional-only because several Switch ops take a `name` argument.
-    async def op(self, name: str, /, **args: Any) -> Any:
-        headers = {**self._auth_headers, "X-Switch-Connection-Id": self.connection_id}
+    # Room-agnostic ops can omit the connection header: the server rejects a
+    # header naming a connection with no open stream (409).
+    async def op(self, name: str, /, *, connection: bool = True, **args: Any) -> Any:
+        headers = dict(self._auth_headers)
+        if connection:
+            headers["X-Switch-Connection-Id"] = self.connection_id
         response = await self._client.post(
             f"{self.base_url}/agents/{self.agent_id}/ops/{name}",
             json=args,

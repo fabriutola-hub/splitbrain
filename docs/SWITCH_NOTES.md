@@ -229,3 +229,55 @@ of the original `message` event. If the original message was itself a reply, use
   `SwitchAgent.server_version` already exposes it for M2+.
 - M1 integration resources are `it-agent-*`, `it-user-*`, `it-room-*`; no reserved demo name is
   touched, and no destructive operation is used, so they remain in the stack after the test.
+
+## Verified in M2 (2026-11-04, live `splitbrain` stack, bootstrap run twice)
+
+- **An op carrying `X-Switch-Connection-Id` for a connection with no open stream is refused with
+  409** `{"detail":"connection … is not open; reconnect and resume from where you got to"}`.
+  `create_room_from_yaml` must therefore be called while a stream is attached: bootstrap keeps one
+  short-lived Sentinel connection (waiting for `connection_state`) for the whole run. Ops that need
+  no room (`get_room_detail`, `list_all_rooms`, …) work **with the header omitted**; M1's
+  `SwitchAgent.op(..., connection=False)` does that, and `splitbrain status` uses it.
+- **The live 0.31.0 operation registry differs from the source tree.** `GET /agents/{id}/ops`
+  shows `list_all_rooms` accepts only `include_archived` (not the source's `limit`/`cursor`) and
+  returns a **bare list** of rooms (18 on this stack), not `{"rooms":[…],"next_cursor":…}`.
+  `create_room_from_yaml` accepts `yaml` + `inputs`; `create_reference`,
+  `attach_reference_to_room`, `invite_agent_to_room`, `link_rooms`, `connect_to_room`,
+  `get_room_detail`, `list_reference_types` and `list_all_references` match the source. Bootstrap
+  calls `list_all_rooms` with no arguments and handles both list and dict shapes. Never add an
+  argument to an op without reading the live registry first.
+- **`create_room_from_yaml` with a version-1 `group:` + `rooms:` + `links:` works when called by an
+  agent.** It returned `{group_id, group_name, rooms:[{room_id, room_name, failed_attachments,…}],
+  errors:[]}`. The template created group "Acme" with 5 rooms, the `arbiter` (exclusive) and
+  `verifier` roles with the instructions from `agents/*.md` supplied through required multiline
+  params in `inputs`, the room document "How Splitbrain works", and **all four `watches` links**
+  from `splitbrain-ops` to the team rooms. Verified through `connect_to_room(ops).linked_rooms`
+  (each entry has `target_room_id`, `target_room_name`, `label`, `access`). Because the template
+  creates the links server-side, **`link_rooms` was never needed**; the "Not yet verified" question
+  about calling `link_rooms` while the caller is a member of only one room remains open.
+- **`create_reference(type="github", …, value={"urls":[…]})` + `attach_reference_to_room` work.**
+  `list_reference_types` includes `github`. `connect_to_room(ops).references` returns the attached
+  reference with its full `value.urls` = `SPLITBRAIN_ROADMAP_REPO` from `.env.local`
+  (`https://github.com/fabriutola-hub/splitbrain-demo-roadmap`). Bootstrap reuses an existing
+  reference by name and attaches only when it is missing.
+- `invite_agent_to_room` works: the template names sentinel/arbiter/verifier in `splitbrain-ops`,
+  and bootstrap invited `splitbrain-arbiter-b`; `get_room_detail(ops).agent_names` now has all four.
+- `get_room_detail` confirms `engineering` is `channel_private` with `connected_user_names=['tomas']`;
+  `sales` has `['lucia','maria']`; every room has `group_name='Acme'`. `splitbrain-ops` has
+  `connected_user_names=[]` because the template names no `users:` (SPEC §4.1: the operator's
+  linked account joins automatically). Roles are unheld until M5.
+- **Mattermost channel visibility**: as `maria` → `off-topic (O), town-square (O), sales (O)`; as
+  `tomas` → `off-topic (O), town-square (O), engineering (P)`. Neither sees the other's private or
+  unrelated rooms, and neither sees `splitbrain-ops`. The five demo channels exist; the acceptance
+  line "Mattermost shows channels …" refers to the operator/admin view.
+- Gateway `set_greetings(bridge_id, False)` is confirmed by a later `GET /gateway/collaborations`
+  (`agent_greetings_enabled=False` on the default Mattermost bridge). All four agents had their
+  addressing policy opened **before** any room was created, so no "Hey! Ping @…" greeting appeared.
+- **State and idempotency**: `.splitbrain/state.json` is written after each step. A first failed
+  run had already created Mattermost users with a password that was never saved, so M1's
+  `MattermostAdmin.ensure_user` now repairs that with
+  `PUT /api/v4/users/{id}/password {"new_password": …}` (admin) when the user's login returns 401.
+  Running bootstrap twice produced the **same state.json hash**, with no duplicate rooms, users or
+  references and no agent key rotation (existing keys are verified through `GET /agents/{id}/ops`).
+- Hackathon rooms (`hackathon-prizes`, `hackathon-judging`) are deliberately not created in M2:
+  TASKS.md assigns their template to M7. The user `fabrizio` is created now, as M2 requires.

@@ -7,12 +7,11 @@ import asyncio
 import sys
 from collections.abc import Sequence
 
-from . import stack
+from . import bootstrap, stack
 from .config import Settings, SplitbrainError
 
 # Commands that belong to later milestones; they must exist in --help now.
 _STUB_MILESTONES: dict[str, str] = {
-    "bootstrap": "M2",
     "eval": "M3",
     "run": "M4",
     "seed": "M4",
@@ -31,8 +30,8 @@ def build_parser() -> argparse.ArgumentParser:
     commands.add_parser("up", help="generate deploy/.env and start the pinned Switch stack")
     down = commands.add_parser("down", help="stop the stack (--wipe also removes volumes)")
     down.add_argument("--wipe", action="store_true", help="remove volumes and .splitbrain/")
-    commands.add_parser("status", help="show Switch health and version")
-    commands.add_parser("bootstrap", help="register agents and create rooms (M2)")
+    commands.add_parser("status", help="show stack health, agents, rooms and the group")
+    commands.add_parser("bootstrap", help="register agents, people and rooms (idempotent)")
 
     run = commands.add_parser("run", help="run one agent in the foreground (M4)")
     run.add_argument("agent", choices=["sentinel", "arbiter", "verifier", "arbiter-b", "all"])
@@ -64,6 +63,9 @@ async def _dispatch(args: argparse.Namespace) -> int:
         await stack.down(settings, wipe=args.wipe)
     elif args.command == "status":
         await stack.status(settings)
+        await bootstrap.print_status(settings)
+    elif args.command == "bootstrap":
+        await bootstrap.run(settings)
     else:
         raise SplitbrainError(f"Unknown command: {args.command}")
     return 0

@@ -1,0 +1,80 @@
+# Splitbrain Acme demo, version-1 group document.
+# Bootstrap registers the four agents and the Mattermost people first; the
+# Sentinel then provisions this whole group in one create_room_from_yaml call.
+# The two placeholders are supplied as operation inputs, read from
+# agents/arbiter.md and agents/verifier.md, so role text has one home.
+version: 1
+params:
+  arbiter_instructions:
+    type: string
+    multiline: true
+    required: true
+    description: Instructions for the exclusive arbiter role
+  verifier_instructions:
+    type: string
+    multiline: true
+    required: true
+    description: Instructions for the verifier role
+
+group:
+  name: Acme
+  description: Fictional customer whose Sales and Engineering teams disagree about SSO
+  color: "#6D28D9"
+
+rooms:
+  - name: sales
+    description: Sales team. Customer commitments live here.
+    channel_type: channel_public
+    users: [maria, lucia]
+    agents: [splitbrain-sentinel]
+
+  - name: engineering
+    description: Engineering team. Private delivery plans live here.
+    channel_type: channel_private
+    users: [tomas]
+    agents: [splitbrain-sentinel]
+
+  - name: support
+    description: Support team. Customer-facing policy answers live here.
+    channel_type: channel_public
+    users: [lucia]
+    agents: [splitbrain-sentinel]
+
+  - name: finance
+    description: Finance team. Budgets and approval rules live here.
+    channel_type: channel_public
+    users: [pablo]
+    agents: [splitbrain-sentinel]
+
+  - name: splitbrain-ops
+    description: Splitbrain operations. Candidates, evidence and decisions stay here.
+    channel_type: channel_public
+    agents: [splitbrain-sentinel, splitbrain-arbiter, splitbrain-verifier]
+    roles:
+      - name: arbiter
+        instructions: "{arbiter_instructions}"
+        exclusive: true
+      - name: verifier
+        instructions: "{verifier_instructions}"
+        exclusive: false
+    docs:
+      - name: How Splitbrain works
+        description: What the three agents do and what only people decide
+        instructions: Read this before acting in this room.
+        content: |
+          Splitbrain watches team rooms for statements that cannot both be true.
+
+          The Sentinel listens to every room and proposes candidates here.
+          The Verifier answers evidence requests from the Acme roadmap GitHub
+          reference. The Arbiter holds the exclusive arbiter role, convenes the
+          two people in a conflict room, and writes down what they decided.
+
+          No agent picks the correct version. Only the people involved decide.
+          A quote from a private room is shown only after its author consents.
+          Corrections go back to the threads where the claims were born.
+
+links:
+  - {from: splitbrain-ops, to: sales, label: watches}
+  - {from: splitbrain-ops, to: engineering, label: watches}
+  - {from: splitbrain-ops, to: support, label: watches}
+  - {from: splitbrain-ops, to: finance, label: watches}

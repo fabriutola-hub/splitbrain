@@ -24,7 +24,6 @@ def test_help_lists_every_command(capsys: pytest.CaptureFixture[str]) -> None:
 @pytest.mark.parametrize(
     ("argv", "milestone"),
     [
-        (["bootstrap"], "M2"),
         (["eval"], "M3"),
         (["run", "sentinel"], "M4"),
         (["seed", "sso"], "M4"),
@@ -36,6 +35,36 @@ def test_stubs_raise_not_implemented(argv: list[str], milestone: str) -> None:
     with pytest.raises(NotImplementedError) as error:
         cli.main(argv)
     assert str(error.value) == milestone
+
+
+def test_bootstrap_dispatch_calls_run(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: list[object] = []
+
+    async def fake_run(settings: object) -> None:
+        calls.append(settings)
+
+    monkeypatch.setattr(cli.bootstrap, "run", fake_run)
+    monkeypatch.setattr(cli.Settings, "load", classmethod(lambda cls, **kwargs: "settings-object"))
+    assert cli.main(["bootstrap"]) == 0
+    assert calls == ["settings-object"]
+
+
+def test_status_dispatch_includes_bootstrap(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[str] = []
+
+    async def fake_health(settings: object) -> None:
+        calls.append("health")
+
+    async def fake_bootstrap_status(settings: object) -> None:
+        calls.append("bootstrap")
+
+    monkeypatch.setattr(cli.stack, "status", fake_health)
+    monkeypatch.setattr(cli.bootstrap, "print_status", fake_bootstrap_status)
+    monkeypatch.setattr(cli.Settings, "load", classmethod(lambda cls, **kwargs: "settings-object"))
+    assert cli.main(["status"]) == 0
+    assert calls == ["health", "bootstrap"]
 
 
 def test_settings_require_env_file(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

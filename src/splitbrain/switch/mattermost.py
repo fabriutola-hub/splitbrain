@@ -193,6 +193,19 @@ class MattermostAdmin:
             raise MattermostError("users/login", response.status_code, "no Token header")
         self._client.headers["Authorization"] = f"Bearer {token}"
 
+    async def set_password(self, user_id: str, password: str) -> None:
+        """Set a user's password as admin; repairs a lost demo password in state."""
+        response = await self._client.put(
+            f"{self.base_url}{API}/users/{user_id}/password",
+            json={"new_password": password},
+        )
+        if response.status_code not in (200, 201, 204):
+            raise MattermostError(
+                "users/password",
+                response.status_code,
+                redact(response.text, (password,)),
+            )
+
     async def team_id(self) -> str:
         if self._team_id is None:
             response = await self._client.get(f"{self.base_url}{API}/teams/name/{self.team_name}")
@@ -239,4 +252,12 @@ class MattermostAdmin:
             raise MattermostError(
                 "teams/members", member.status_code, redact(member.text, (password,))
             )
-        return await MattermostUser.login(self.base_url, username, password, self.team_name)
+        try:
+            return await MattermostUser.login(self.base_url, username, password, self.team_name)
+        except MattermostError as exc:
+            # A previous failed run may have created the user with a password
+            # that never reached state.json. Repair it instead of duplicating.
+            if exc.status != 401:
+                raise
+            await self.set_password(user.id, password)
+            return await MattermostUser.login(self.base_url, username, password, self.team_name)
