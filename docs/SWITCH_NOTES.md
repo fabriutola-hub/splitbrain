@@ -181,7 +181,11 @@ of the original `message` event. If the original message was itself a reply, use
   `trust_env=True`, a `POST /gateway/auth/login` issued after a `GET /health` on the same client
   returned 401 `Missing or invalid Authorization header` (from the agent bridge's bearer
   middleware), while a fresh-client POST or curl returned 200. `httpx.AsyncClient(trust_env=False)`
-  fixes it deterministically. Use it for every loopback call in later milestones.
+  fixes it deterministically. **Scope of the fix (orchestrator rule, M1):** `trust_env=False`
+  applies ONLY to clients that talk to loopback (Switch, Gateway, Mattermost, stack health).
+  Internet-facing clients (GitHub API, the LLM) keep httpx's default `trust_env=True` so they
+  work both inside this sandbox and on a normal machine. M1 centralizes this in
+  `config.loopback_client()`.
 - The Docker CLI is **not on PATH** here (`docker` is not found in Git Bash or PowerShell); the
   executable is `D:\Docker\DockerDesktop\resources\bin\docker.exe` (Docker 29.9.2, Compose
   v5.6.1). M0 resolves it with `shutil.which`, two standard Windows install paths and a
@@ -192,3 +196,36 @@ of the original `message` event. If the original message was itself a reply, use
   exactly those blanks. `splitbrain up` fills only the seven real secrets listed above.
 - The upstream `LICENSE` is Apache 2.0 **plus a "Commons Clause" restriction**; Splitbrain ships a
   plain Apache-2.0 `LICENSE` instead.
+
+## Verified in M1 (2026-11-04, live `splitbrain` stack, `it-` temporary resources)
+
+- `POST /agents` with the custom `integration_profile` from "Registering our own agents" returns
+  200 `{"id","api_key"}`. `PUT /gateway/agents/{id}/addressing-policy {"policy": null}` returns
+  200 for a freshly registered `it-` agent.
+- **`GET /gateway/collaborations` returns a JSON list whose elements use `bridge_id`, not `id`.**
+  Verified live: keys include `bridge_id`, `display_name`, `agent_greetings_enabled`,
+  `is_default`, `bridge_type`, `room_count`. The "Gateway admin calls" section above says `id`;
+  the upstream source (`gateway/schemas.py::BridgeDetail`) and the server say `bridge_id`, so the
+  source wins. `GatewayBridge` accepts both. M2 must use `bridge_id`.
+- **A `scope=all&filter=all` stream does not emit `subscription_changed` on `create_room` alone.**
+  On this stack the frame arrives when the connection claims the room with `connect_to_room`
+  (`{"rooms":["<room id>"],"reason":"subscription updated"}`). Gate 1's log shows the frame
+  right after `create_room` because that probe also connected to the room. The M1 integration
+  test claims the room explicitly before posting.
+- After claiming, a Mattermost post that does **not** mention the agent arrives as `event: message`
+  with `payload.addressed=false`, `sender_name` = the Mattermost username, `channel_type` and a
+  `sequence` of `9007194959773696` (> 2^53, Python `int`). `connection_state` carries
+  `server.version="0.31.0"`, `protocol=9`, `heartbeat_interval_seconds=2.0`. Control frames
+  (`connection_state`, `subscription_changed`, ...) have **no `type` field in their data** — the
+  SSE `event:` name is the kind; domain events carry both. Keepalives are bare `:` comments.
+- `post_message` with `thread_id` set to the root event's `payload.message_id` shows up as a reply
+  in the Mattermost thread read through `GET /api/v4/posts/{post_id}/thread` (verified end to end).
+- Mattermost: `GET /users/username/{name}` → 404 for a new user; `POST /users` → 201;
+  `POST /teams/{team_id}/members` → 201 (409 when already a member). The bridged channel needs
+  about a second to settle after creation; the integration test waits 1 s before posting.
+- `splitbrain status` keeps M0's authenticated gateway-login version lookup: M1 can read
+  `connection_state.server.version` once an agent is connected, but no agent credentials exist
+  until M2's bootstrap, and registering a throwaway agent just to print the version is wasteful.
+  `SwitchAgent.server_version` already exposes it for M2+.
+- M1 integration resources are `it-agent-*`, `it-user-*`, `it-room-*`; no reserved demo name is
+  touched, and no destructive operation is used, so they remain in the stack after the test.

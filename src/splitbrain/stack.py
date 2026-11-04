@@ -18,6 +18,7 @@ from .config import (
     Settings,
     SplitbrainError,
     ensure_env,
+    loopback_client,
     redact,
 )
 
@@ -31,11 +32,6 @@ class CommandResult:
     returncode: int
     stdout: str
     stderr: str
-
-
-def _local_client() -> httpx.AsyncClient:
-    """Loopback calls must ignore HTTP_PROXY: this machine sets no NO_PROXY."""
-    return httpx.AsyncClient(trust_env=False)
 
 
 def _run_sync(args: list[str]) -> CommandResult:
@@ -79,7 +75,7 @@ def _parse_health(response: httpx.Response, settings: Settings) -> dict[str, Any
 
 async def _wait_for_health(settings: Settings) -> None:
     deadline = time.monotonic() + HEALTH_TIMEOUT_S
-    async with _local_client() as client:
+    async with loopback_client() as client:
         while True:
             try:
                 response = await client.get(settings.health_url, timeout=3.0)
@@ -206,7 +202,7 @@ async def _server_version(
 
 
 async def status(settings: Settings) -> None:
-    async with _local_client() as client:
+    async with loopback_client() as client:
         try:
             response = await client.get(settings.health_url, timeout=5.0)
         except httpx.TransportError as exc:

@@ -9,7 +9,9 @@ import shutil
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
+import httpx
 from dotenv import dotenv_values
 
 PINNED_SWITCH_VERSION = "0.31.0"
@@ -40,6 +42,16 @@ REQUIRED_ENV_KEYS: tuple[str, ...] = (
 
 class SplitbrainError(RuntimeError):
     """A configuration or stack error that stops the CLI with a clear message."""
+
+
+def loopback_client(**kwargs: Any) -> httpx.AsyncClient:
+    """Client for local services only (Switch, Gateway, Mattermost).
+
+    This sandbox sets HTTP_PROXY without NO_PROXY, which breaks loopback calls.
+    Internet-facing clients (GitHub, the LLM) must keep httpx's default trust_env
+    so they work both inside the sandbox and on a normal machine.
+    """
+    return httpx.AsyncClient(trust_env=False, **kwargs)
 
 
 @dataclass(frozen=True, slots=True)
