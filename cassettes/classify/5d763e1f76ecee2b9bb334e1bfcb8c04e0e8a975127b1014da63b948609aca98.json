@@ -1,0 +1,38 @@
+{
+  "input": {
+    "claim_a": {
+      "author": "priya",
+      "effective_date": null,
+      "kind": "policy",
+      "polarity": "affirm",
+      "room": "product",
+      "scope": "enterprise tier",
+      "scope_key": "enterprise",
+      "subject": "enterprise plan seat count",
+      "subject_key": "enterprise-seats",
+      "text": "The enterprise plan includes 25 seats and charges for each extra seat.",
+      "value": "25 seats included, extra seats charged"
+    },
+    "claim_b": {
+      "author": "maria",
+      "effective_date": null,
+      "kind": "policy",
+      "polarity": "affirm",
+      "room": "sales",
+      "scope": "enterprise tier",
+      "scope_key": "enterprise",
+      "subject": "enterprise plan seat count",
+      "subject_key": "enterprise-seats",
+      "text": "The enterprise plan includes 50 seats, that is what the order form says.",
+      "value": "50 seats included"
+    }
+  },
+  "model": "deepseek-ai/DeepSeek-V4.1-Flash-1017",
+  "output": {
+    "confidence": 0.9,
+    "reason": "Product says the enterprise plan includes 25 seats while sales says the order form includes 50, mutually exclusive seat counts for the same tier.",
+    "relation": "contradiction"
+  },
+  "recorded_at": "2026-11-04T10:08:40+00:00",
+  "task": "classify"
+}

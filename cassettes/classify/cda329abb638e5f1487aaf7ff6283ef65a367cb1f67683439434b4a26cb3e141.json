@@ -1,0 +1,38 @@
+{
+  "input": {
+    "claim_a": {
+      "author": "pablo",
+      "effective_date": null,
+      "kind": "policy",
+      "polarity": "affirm",
+      "room": "finance",
+      "scope": "*",
+      "scope_key": "*",
+      "subject": "refund approval threshold",
+      "subject_key": "refunds",
+      "text": "Refunds above $250 require manager approval for all customers this quarter.",
+      "value": "refunds above $250 require manager approval"
+    },
+    "claim_b": {
+      "author": "sofia",
+      "effective_date": null,
+      "kind": "decision",
+      "polarity": "affirm",
+      "room": "ops",
+      "scope": "*",
+      "scope_key": "*",
+      "subject": "refund approval threshold",
+      "subject_key": "refunds",
+      "text": "Update from finance: the $250 refund threshold was replaced by $500 on Monday, the old note is void.",
+      "value": "$250 threshold replaced by $500"
+    }
+  },
+  "model": "deepseek-ai/DeepSeek-V4.1-Flash-1017",
+  "output": {
+    "confidence": 0.95,
+    "reason": "The second message explicitly states the $250 threshold was replaced by $500 and the old note is void.",
+    "relation": "update"
+  },
+  "recorded_at": "2026-11-04T10:09:23+00:00",
+  "task": "classify"
+}

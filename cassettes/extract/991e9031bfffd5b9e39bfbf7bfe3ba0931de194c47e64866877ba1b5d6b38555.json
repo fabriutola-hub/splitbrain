@@ -1,0 +1,27 @@
+{
+  "input": {
+    "author": "owen",
+    "message_id": "n21-b",
+    "room": "engineering",
+    "text": "The mobile app reaches general availability in Q1 after the December beta."
+  },
+  "model": "deepseek-ai/DeepSeek-V4.1-Flash-1017",
+  "output": {
+    "claims": [
+      {
+        "confidence": 0.85,
+        "effective_date": null,
+        "kind": "commitment",
+        "polarity": "affirm",
+        "scope": "*",
+        "scope_key": "*",
+        "subject": "mobile app general availability",
+        "subject_key": "mobile-app-ga",
+        "value": "Q1, after the December beta"
+      }
+    ],
+    "message_id": "n21-b"
+  },
+  "recorded_at": "2026-11-04T10:09:29+00:00",
+  "task": "extract"
+}

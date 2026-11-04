@@ -1,0 +1,27 @@
+{
+  "input": {
+    "author": "lucia",
+    "message_id": "n23-b",
+    "room": "support",
+    "text": "The 99.9% SLA excludes a two-hour monthly maintenance window for all customers."
+  },
+  "model": "deepseek-ai/DeepSeek-V4.1-Flash-1017",
+  "output": {
+    "claims": [
+      {
+        "confidence": 0.9,
+        "effective_date": null,
+        "kind": "policy",
+        "polarity": "negate",
+        "scope": "*",
+        "scope_key": "*",
+        "subject": "uptime SLA",
+        "subject_key": "uptime-sla",
+        "value": "excludes a two-hour monthly maintenance window"
+      }
+    ],
+    "message_id": "n23-b"
+  },
+  "recorded_at": "2026-11-04T10:09:34+00:00",
+  "task": "extract"
+}

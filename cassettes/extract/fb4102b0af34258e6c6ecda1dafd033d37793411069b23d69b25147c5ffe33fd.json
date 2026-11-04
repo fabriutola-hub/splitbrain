@@ -1,0 +1,27 @@
+{
+  "input": {
+    "author": "priya",
+    "message_id": "n10-b",
+    "room": "leadership",
+    "text": "We are raising the uptime SLA to 99.95% starting in Q3."
+  },
+  "model": "deepseek-ai/DeepSeek-V4.1-Flash-1017",
+  "output": {
+    "claims": [
+      {
+        "confidence": 0.9,
+        "effective_date": null,
+        "kind": "decision",
+        "polarity": "affirm",
+        "scope": "*",
+        "scope_key": "*",
+        "subject": "uptime SLA",
+        "subject_key": "uptime-sla",
+        "value": "raised to 99.95% starting Q3"
+      }
+    ],
+    "message_id": "n10-b"
+  },
+  "recorded_at": "2026-11-04T10:09:09+00:00",
+  "task": "extract"
+}

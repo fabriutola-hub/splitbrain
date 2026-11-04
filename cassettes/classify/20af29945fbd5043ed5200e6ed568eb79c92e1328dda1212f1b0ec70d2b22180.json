@@ -1,0 +1,38 @@
+{
+  "input": {
+    "claim_a": {
+      "author": "tomas",
+      "effective_date": null,
+      "kind": "decision",
+      "polarity": "negate",
+      "room": "engineering",
+      "scope": "*",
+      "scope_key": "*",
+      "subject": "SSO",
+      "subject_key": "sso",
+      "text": "Heads up: we are pulling SSO out of Q4. The auth migration has to land first.",
+      "value": "removed from Q4 delivery"
+    },
+    "claim_b": {
+      "author": "maria",
+      "effective_date": "2026-12-01",
+      "kind": "commitment",
+      "polarity": "affirm",
+      "room": "sales",
+      "scope": "Acme",
+      "scope_key": "acme",
+      "subject": "SSO",
+      "subject_key": "sso",
+      "text": "Morning all, confirmed with Acme that SSO will be live for them on December 1.",
+      "value": "live on 2026-12-01"
+    }
+  },
+  "model": "deepseek-ai/DeepSeek-V4.1-Flash-1017",
+  "output": {
+    "confidence": 0.9,
+    "reason": "Engineering removed SSO from Q4 delivery while sales committed Acme SSO live on December 1, which falls in Q4.",
+    "relation": "contradiction"
+  },
+  "recorded_at": "2026-11-04T10:07:51+00:00",
+  "task": "classify"
+}

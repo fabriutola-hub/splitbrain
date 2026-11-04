@@ -1,0 +1,38 @@
+{
+  "input": {
+    "claim_a": {
+      "author": "owen",
+      "effective_date": "2026-12-01",
+      "kind": "decision",
+      "polarity": "affirm",
+      "room": "engineering",
+      "scope": "*",
+      "scope_key": "*",
+      "subject": "API rate limit",
+      "subject_key": "api-rate-limits",
+      "text": "Engineering is capping the public API at 100 requests per minute from December 1.",
+      "value": "100 requests per minute"
+    },
+    "claim_b": {
+      "author": "priya",
+      "effective_date": "2026-12-01",
+      "kind": "decision",
+      "polarity": "affirm",
+      "room": "product",
+      "scope": "*",
+      "scope_key": "*",
+      "subject": "API rate limit",
+      "subject_key": "api-rate-limits",
+      "text": "We are raising the public API rate limit to 1000 requests per minute on December 1.",
+      "value": "1000 requests per minute"
+    }
+  },
+  "model": "deepseek-ai/DeepSeek-V4.1-Flash-1017",
+  "output": {
+    "confidence": 0.93,
+    "reason": "Engineering caps the public API at 100 rpm on December 1 while product says it rises to 1000 rpm the same day, mutually exclusive limits.",
+    "relation": "contradiction"
+  },
+  "recorded_at": "2026-11-04T10:07:58+00:00",
+  "task": "classify"
+}

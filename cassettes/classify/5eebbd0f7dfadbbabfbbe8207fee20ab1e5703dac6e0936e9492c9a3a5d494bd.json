@@ -1,0 +1,38 @@
+{
+  "input": {
+    "claim_a": {
+      "author": "owen",
+      "effective_date": null,
+      "kind": "decision",
+      "polarity": "negate",
+      "room": "engineering",
+      "scope": "*",
+      "scope_key": "*",
+      "subject": "mobile app launch",
+      "subject_key": "mobile-app-launch",
+      "text": "The mobile app is delayed to Q1; there will be no December release.",
+      "value": "delayed to Q1, no December release"
+    },
+    "claim_b": {
+      "author": "emma",
+      "effective_date": "2026-12-01",
+      "kind": "commitment",
+      "polarity": "affirm",
+      "room": "marketing",
+      "scope": "*",
+      "scope_key": "*",
+      "subject": "mobile app launch",
+      "subject_key": "mobile-app-launch",
+      "text": "The mobile app launches on December 1, the app store assets are approved.",
+      "value": "launches on 2026-12-01"
+    }
+  },
+  "model": "deepseek-ai/DeepSeek-V4.1-Flash-1017",
+  "output": {
+    "confidence": 0.93,
+    "reason": "Engineering says the mobile app is delayed to Q1 with no December release, while marketing asserts a December 1 launch.",
+    "relation": "contradiction"
+  },
+  "recorded_at": "2026-11-04T10:08:49+00:00",
+  "task": "classify"
+}

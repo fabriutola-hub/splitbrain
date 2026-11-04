@@ -54,6 +54,81 @@ def loopback_client(**kwargs: Any) -> httpx.AsyncClient:
     return httpx.AsyncClient(trust_env=False, **kwargs)
 
 
+def internet_client(**kwargs: Any) -> httpx.AsyncClient:
+    """Client for internet-facing APIs (LLM, GitHub).
+
+    trust_env is deliberately left at httpx's default so proxy environment
+    variables are honoured. Only loopback clients disable it.
+    """
+    return httpx.AsyncClient(**kwargs)
+
+
+DEFAULT_LLM_BASE_URL = "https://openrouter.ai/api/v1"
+DEFAULT_LLM_MODEL = "tencent/hy4"
+LLM_MODES: tuple[str, ...] = ("live", "record", "replay")
+LLM_ENV_KEYS: tuple[str, ...] = (
+    "SPLITBRAIN_LLM_BASE_URL",
+    "SPLITBRAIN_LLM_MODEL",
+    "SPLITBRAIN_LLM_API_KEY",
+    "SPLITBRAIN_LLM_REASONING_EFFORT",
+    "SPLITBRAIN_LLM_MODE",
+)
+
+
+@dataclass(frozen=True, slots=True)
+class LLMSettings:
+    """OpenAI-compatible endpoint settings; process env > .env.local > defaults."""
+
+    base_url: str
+    model: str
+    api_key: str
+    reasoning_effort: str | None
+    mode: str
+    cassettes_dir: Path
+    eval_dir: Path
+
+    @classmethod
+    def load(cls, *, mode: str | None = None) -> LLMSettings:
+        paths = Paths.default()
+        values: dict[str, str] = {}
+        local_file = paths.root / ".env.local"
+        if local_file.is_file():
+            for key, value in dotenv_values(local_file).items():
+                if value is not None:
+                    values[key] = value
+        for key in LLM_ENV_KEYS:
+            if key in os.environ:
+                values[key] = os.environ[key]
+
+        selected = (mode or values.get("SPLITBRAIN_LLM_MODE") or "").strip().lower()
+        if not selected:
+            selected = "live" if values.get("SPLITBRAIN_LLM_API_KEY", "").strip() else "replay"
+        if selected not in LLM_MODES:
+            raise SplitbrainError(
+                f"SPLITBRAIN_LLM_MODE must be one of {', '.join(LLM_MODES)}, got {selected!r}."
+            )
+
+        api_key = values.get("SPLITBRAIN_LLM_API_KEY", "").strip()
+        if selected != "replay" and not api_key:
+            raise SplitbrainError(
+                "SPLITBRAIN_LLM_API_KEY is missing. Put it in .env.local (gitignored) or the "
+                f"process environment to use LLM mode {selected!r}; use mode 'replay' to run "
+                "offline from the committed cassettes."
+            )
+        effort = values.get("SPLITBRAIN_LLM_REASONING_EFFORT", "").strip()
+        return cls(
+            base_url=(values.get("SPLITBRAIN_LLM_BASE_URL") or DEFAULT_LLM_BASE_URL)
+            .strip()
+            .rstrip("/"),
+            model=(values.get("SPLITBRAIN_LLM_MODEL") or DEFAULT_LLM_MODEL).strip(),
+            api_key=api_key,
+            reasoning_effort=effort or None,
+            mode=selected,
+            cassettes_dir=paths.root / "cassettes",
+            eval_dir=paths.root / "eval",
+        )
+
+
 @dataclass(frozen=True, slots=True)
 class Paths:
     root: Path

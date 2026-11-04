@@ -1,0 +1,38 @@
+{
+  "input": {
+    "claim_a": {
+      "author": "priya",
+      "effective_date": null,
+      "kind": "status",
+      "polarity": "affirm",
+      "room": "product",
+      "scope": "enterprise tier",
+      "scope_key": "enterprise",
+      "subject": "enterprise trial length",
+      "subject_key": "trial-length",
+      "text": "The enterprise trial is 14 days in the billing system, not 30 days.",
+      "value": "14 days"
+    },
+    "claim_b": {
+      "author": "ravi",
+      "effective_date": null,
+      "kind": "policy",
+      "polarity": "affirm",
+      "room": "sales",
+      "scope": "enterprise tier",
+      "scope_key": "enterprise",
+      "subject": "enterprise trial length",
+      "subject_key": "trial-length",
+      "text": "Enterprise trials are 30 days, I have been quoting that to prospects all week.",
+      "value": "30 days"
+    }
+  },
+  "model": "deepseek-ai/DeepSeek-V4.1-Flash-1017",
+  "output": {
+    "confidence": 0.93,
+    "reason": "Product states the enterprise trial is 14 days while sales asserts it is 30 days for the same enterprise tier.",
+    "relation": "contradiction"
+  },
+  "recorded_at": "2026-11-04T10:08:08+00:00",
+  "task": "classify"
+}

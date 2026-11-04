@@ -1,0 +1,27 @@
+{
+  "input": {
+    "author": "dana",
+    "message_id": "n15-b",
+    "room": "leadership",
+    "text": "As of today engineering replaced that plan: SSO is now scheduled for Q1 and the Q4 date is superseded."
+  },
+  "model": "deepseek-ai/DeepSeek-V4.1-Flash-1017",
+  "output": {
+    "claims": [
+      {
+        "confidence": 0.92,
+        "effective_date": null,
+        "kind": "decision",
+        "polarity": "affirm",
+        "scope": "*",
+        "scope_key": "*",
+        "subject": "SSO",
+        "subject_key": "sso",
+        "value": "scheduled for Q1, Q4 date superseded"
+      }
+    ],
+    "message_id": "n15-b"
+  },
+  "recorded_at": "2026-11-04T10:09:18+00:00",
+  "task": "extract"
+}

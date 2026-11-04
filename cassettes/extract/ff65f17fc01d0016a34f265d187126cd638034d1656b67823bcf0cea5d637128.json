@@ -1,0 +1,27 @@
+{
+  "input": {
+    "author": "dana",
+    "message_id": "c09-b",
+    "room": "ops",
+    "text": "Ops has no December freeze; everyone can book leave through the holidays."
+  },
+  "model": "deepseek-ai/DeepSeek-V4.1-Flash-1017",
+  "output": {
+    "claims": [
+      {
+        "confidence": 0.9,
+        "effective_date": null,
+        "kind": "policy",
+        "polarity": "negate",
+        "scope": "Ops",
+        "scope_key": "ops",
+        "subject": "vacation blackout",
+        "subject_key": "holiday-cover",
+        "value": "no December freeze; leave bookable through holidays"
+      }
+    ],
+    "message_id": "c09-b"
+  },
+  "recorded_at": "2026-11-04T10:08:15+00:00",
+  "task": "extract"
+}

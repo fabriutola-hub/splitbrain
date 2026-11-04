@@ -1,0 +1,38 @@
+{
+  "input": {
+    "claim_a": {
+      "author": "pablo",
+      "effective_date": null,
+      "kind": "policy",
+      "polarity": "affirm",
+      "room": "finance",
+      "scope": "*",
+      "scope_key": "*",
+      "subject": "refund approval threshold",
+      "subject_key": "refunds",
+      "text": "Finance policy: every refund above $250 requires manager approval until further notice.",
+      "value": "refunds above $250 require manager approval"
+    },
+    "claim_b": {
+      "author": "lucia",
+      "effective_date": null,
+      "kind": "policy",
+      "polarity": "negate",
+      "room": "support",
+      "scope": "*",
+      "scope_key": "*",
+      "subject": "refund approval threshold",
+      "subject_key": "refunds",
+      "text": "For the record, refunds over $500 do not need manager approval; support can approve them directly.",
+      "value": "refunds over $500 do not need manager approval; support can approve directly"
+    }
+  },
+  "model": "deepseek-ai/DeepSeek-V4.1-Flash-1017",
+  "output": {
+    "confidence": 0.93,
+    "reason": "Finance requires manager approval above $250 while support says refunds over $500 need no manager approval, so the same refunds cannot satisfy both policies.",
+    "relation": "contradiction"
+  },
+  "recorded_at": "2026-11-04T10:07:54+00:00",
+  "task": "classify"
+}

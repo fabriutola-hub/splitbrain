@@ -1,0 +1,38 @@
+{
+  "input": {
+    "claim_a": {
+      "author": "dana",
+      "effective_date": null,
+      "kind": "status",
+      "polarity": "negate",
+      "room": "ops",
+      "scope": "*",
+      "scope_key": "*",
+      "subject": "support hours",
+      "subject_key": "support-hours",
+      "text": "Support stays weekdays 9 to 5 only; there is no night shift approved.",
+      "value": "weekdays 9 to 5 only, no night shift approved"
+    },
+    "claim_b": {
+      "author": "lucia",
+      "effective_date": "2026-01-01",
+      "kind": "commitment",
+      "polarity": "affirm",
+      "room": "support",
+      "scope": "*",
+      "scope_key": "*",
+      "subject": "support hours",
+      "subject_key": "support-hours",
+      "text": "Support goes 24/7 from January 1, we have staffed the night shift already.",
+      "value": "24/7 from 2026-01-01"
+    }
+  },
+  "model": "deepseek-ai/DeepSeek-V4.1-Flash-1017",
+  "output": {
+    "confidence": 0.9,
+    "reason": "Ops says no night shift is approved while support commits to 24/7 coverage from January 1, which cannot both hold now.",
+    "relation": "contradiction"
+  },
+  "recorded_at": "2026-11-04T10:08:26+00:00",
+  "task": "classify"
+}

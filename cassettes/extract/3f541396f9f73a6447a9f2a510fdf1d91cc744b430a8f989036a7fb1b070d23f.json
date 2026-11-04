@@ -1,0 +1,27 @@
+{
+  "input": {
+    "author": "tomas",
+    "message_id": "c01-b",
+    "room": "engineering",
+    "text": "Heads up: we are pulling SSO out of Q4. The auth migration has to land first."
+  },
+  "model": "deepseek-ai/DeepSeek-V4.1-Flash-1017",
+  "output": {
+    "claims": [
+      {
+        "confidence": 0.9,
+        "effective_date": null,
+        "kind": "decision",
+        "polarity": "negate",
+        "scope": "*",
+        "scope_key": "*",
+        "subject": "SSO",
+        "subject_key": "sso",
+        "value": "removed from Q4 delivery"
+      }
+    ],
+    "message_id": "c01-b"
+  },
+  "recorded_at": "2026-11-04T10:07:50+00:00",
+  "task": "extract"
+}

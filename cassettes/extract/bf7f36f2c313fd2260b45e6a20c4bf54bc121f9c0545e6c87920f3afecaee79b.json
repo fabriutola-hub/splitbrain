@@ -1,0 +1,27 @@
+{
+  "input": {
+    "author": "lucia",
+    "message_id": "c11-a",
+    "room": "support",
+    "text": "Support goes 24/7 from January 1, we have staffed the night shift already."
+  },
+  "model": "deepseek-ai/DeepSeek-V4.1-Flash-1017",
+  "output": {
+    "claims": [
+      {
+        "confidence": 0.9,
+        "effective_date": "2026-01-01",
+        "kind": "commitment",
+        "polarity": "affirm",
+        "scope": "*",
+        "scope_key": "*",
+        "subject": "support hours",
+        "subject_key": "support-hours",
+        "value": "24/7 from 2026-01-01"
+      }
+    ],
+    "message_id": "c11-a"
+  },
+  "recorded_at": "2026-11-04T10:08:24+00:00",
+  "task": "extract"
+}

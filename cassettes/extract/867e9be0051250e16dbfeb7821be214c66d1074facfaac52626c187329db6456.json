@@ -1,0 +1,27 @@
+{
+  "input": {
+    "author": "tomas",
+    "message_id": "n15-a",
+    "room": "engineering",
+    "text": "SSO is scheduled for the Q4 release, the migration lands in November."
+  },
+  "model": "deepseek-ai/DeepSeek-V4.1-Flash-1017",
+  "output": {
+    "claims": [
+      {
+        "confidence": 0.9,
+        "effective_date": null,
+        "kind": "commitment",
+        "polarity": "affirm",
+        "scope": "*",
+        "scope_key": "*",
+        "subject": "SSO",
+        "subject_key": "sso",
+        "value": "scheduled for Q4 release"
+      }
+    ],
+    "message_id": "n15-a"
+  },
+  "recorded_at": "2026-11-04T10:09:18+00:00",
+  "task": "extract"
+}

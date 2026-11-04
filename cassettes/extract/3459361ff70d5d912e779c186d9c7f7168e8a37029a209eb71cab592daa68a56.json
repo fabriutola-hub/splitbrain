@@ -1,0 +1,27 @@
+{
+  "input": {
+    "author": "dana",
+    "message_id": "c05-b",
+    "room": "ops",
+    "text": "Ops can only commit to 99.5% uptime for all customers in January."
+  },
+  "model": "deepseek-ai/DeepSeek-V4.1-Flash-1017",
+  "output": {
+    "claims": [
+      {
+        "confidence": 0.9,
+        "effective_date": null,
+        "kind": "commitment",
+        "polarity": "affirm",
+        "scope": "*",
+        "scope_key": "*",
+        "subject": "uptime SLA",
+        "subject_key": "uptime-sla",
+        "value": "99.5% uptime in January"
+      }
+    ],
+    "message_id": "c05-b"
+  },
+  "recorded_at": "2026-11-04T10:08:03+00:00",
+  "task": "extract"
+}

@@ -1,0 +1,27 @@
+{
+  "input": {
+    "author": "hana",
+    "message_id": "c07-a",
+    "room": "security",
+    "text": "All EU customer data must stay in the Frankfurt region, that is the compliance commitment."
+  },
+  "model": "deepseek-ai/DeepSeek-V4.1-Flash-1017",
+  "output": {
+    "claims": [
+      {
+        "confidence": 0.95,
+        "effective_date": null,
+        "kind": "policy",
+        "polarity": "affirm",
+        "scope": "EU customers",
+        "scope_key": "eu-customers",
+        "subject": "data residency",
+        "subject_key": "data-region",
+        "value": "data must stay in Frankfurt region"
+      }
+    ],
+    "message_id": "c07-a"
+  },
+  "recorded_at": "2026-11-04T10:08:09+00:00",
+  "task": "extract"
+}

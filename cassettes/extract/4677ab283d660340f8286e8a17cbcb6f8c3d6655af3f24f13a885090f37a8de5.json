@@ -1,0 +1,15 @@
+{
+  "input": {
+    "author": "diego",
+    "message_id": "n12-a",
+    "room": "emea-sales",
+    "text": "Si posponemos el aumento de precios a marzo, podríamos perder a dos clientes."
+  },
+  "model": "deepseek-ai/DeepSeek-V4.1-Flash-1017",
+  "output": {
+    "claims": [],
+    "message_id": "n12-a"
+  },
+  "recorded_at": "2026-11-04T10:09:14+00:00",
+  "task": "extract"
+}

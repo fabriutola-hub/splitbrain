@@ -1,0 +1,27 @@
+{
+  "input": {
+    "author": "tomas",
+    "message_id": "n11-b",
+    "room": "engineering",
+    "text": "SSO is not in the Q4 release; the auth migration has to land first."
+  },
+  "model": "deepseek-ai/DeepSeek-V4.1-Flash-1017",
+  "output": {
+    "claims": [
+      {
+        "confidence": 0.9,
+        "effective_date": null,
+        "kind": "status",
+        "polarity": "negate",
+        "scope": "*",
+        "scope_key": "*",
+        "subject": "SSO",
+        "subject_key": "sso",
+        "value": "not in Q4 release"
+      }
+    ],
+    "message_id": "n11-b"
+  },
+  "recorded_at": "2026-11-04T10:09:12+00:00",
+  "task": "extract"
+}

@@ -1,0 +1,38 @@
+{
+  "input": {
+    "claim_a": {
+      "author": "owen",
+      "effective_date": null,
+      "kind": "policy",
+      "polarity": "affirm",
+      "room": "engineering",
+      "scope": "*",
+      "scope_key": "*",
+      "subject": "API rate limit",
+      "subject_key": "api-rate-limits",
+      "text": "The API rate limit is 1000 requests per minute for every account.",
+      "value": "1000 requests per minute"
+    },
+    "claim_b": {
+      "author": "priya",
+      "effective_date": null,
+      "kind": "policy",
+      "polarity": "affirm",
+      "room": "product",
+      "scope": "enterprise tier",
+      "scope_key": "enterprise",
+      "subject": "API rate limit burst allowance",
+      "subject_key": "api-rate-limits",
+      "text": "Enterprise accounts also get a 2000 requests per minute burst allowance.",
+      "value": "2000 requests per minute burst allowance"
+    }
+  },
+  "model": "deepseek-ai/DeepSeek-V4.1-Flash-1017",
+  "output": {
+    "confidence": 0.9,
+    "reason": "The 1000 rpm base limit and the 2000 rpm enterprise burst allowance are additive limits that can both hold.",
+    "relation": "compatible"
+  },
+  "recorded_at": "2026-11-04T10:09:08+00:00",
+  "task": "classify"
+}

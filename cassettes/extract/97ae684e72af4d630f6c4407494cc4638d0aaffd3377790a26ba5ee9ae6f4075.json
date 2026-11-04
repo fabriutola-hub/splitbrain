@@ -1,0 +1,27 @@
+{
+  "input": {
+    "author": "tomas",
+    "message_id": "n24-b",
+    "room": "engineering",
+    "text": "The audit log PDF export is planned for Q1, after the CSV export."
+  },
+  "model": "deepseek-ai/DeepSeek-V4.1-Flash-1017",
+  "output": {
+    "claims": [
+      {
+        "confidence": 0.85,
+        "effective_date": null,
+        "kind": "commitment",
+        "polarity": "affirm",
+        "scope": "*",
+        "scope_key": "*",
+        "subject": "audit log PDF export",
+        "subject_key": "audit-log-pdf-export",
+        "value": "planned for Q1, after CSV export"
+      }
+    ],
+    "message_id": "n24-b"
+  },
+  "recorded_at": "2026-11-04T10:09:37+00:00",
+  "task": "extract"
+}

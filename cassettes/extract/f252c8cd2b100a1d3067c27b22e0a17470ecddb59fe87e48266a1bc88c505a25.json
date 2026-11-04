@@ -1,0 +1,27 @@
+{
+  "input": {
+    "author": "noah",
+    "message_id": "c17-b",
+    "room": "data",
+    "text": "We are cutting backup retention to 30 days across all accounts in January."
+  },
+  "model": "deepseek-ai/DeepSeek-V4.1-Flash-1017",
+  "output": {
+    "claims": [
+      {
+        "confidence": 0.9,
+        "effective_date": null,
+        "kind": "decision",
+        "polarity": "affirm",
+        "scope": "*",
+        "scope_key": "*",
+        "subject": "backup retention",
+        "subject_key": "backup-retention",
+        "value": "cut to 30 days in January"
+      }
+    ],
+    "message_id": "c17-b"
+  },
+  "recorded_at": "2026-11-04T10:08:45+00:00",
+  "task": "extract"
+}

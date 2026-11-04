@@ -1,0 +1,38 @@
+{
+  "input": {
+    "claim_a": {
+      "author": "tomas",
+      "effective_date": null,
+      "kind": "commitment",
+      "polarity": "affirm",
+      "room": "engineering",
+      "scope": "*",
+      "scope_key": "*",
+      "subject": "audit log PDF export",
+      "subject_key": "audit-log-pdf-export",
+      "text": "The audit log PDF export is planned for Q1, after the CSV export.",
+      "value": "planned for Q1, after CSV export"
+    },
+    "claim_b": {
+      "author": "priya",
+      "effective_date": null,
+      "kind": "commitment",
+      "polarity": "affirm",
+      "room": "product",
+      "scope": "*",
+      "scope_key": "*",
+      "subject": "audit log CSV export",
+      "subject_key": "audit-log-csv-export",
+      "text": "The audit log CSV export is scoped for the Q4 release.",
+      "value": "scoped for Q4 release"
+    }
+  },
+  "model": "deepseek-ai/DeepSeek-V4.1-Flash-1017",
+  "output": {
+    "confidence": 0.9,
+    "reason": "The CSV export in Q4 and the PDF export in Q1 are different features on a sequenced roadmap, so both can be true.",
+    "relation": "compatible"
+  },
+  "recorded_at": "2026-11-04T10:09:39+00:00",
+  "task": "classify"
+}

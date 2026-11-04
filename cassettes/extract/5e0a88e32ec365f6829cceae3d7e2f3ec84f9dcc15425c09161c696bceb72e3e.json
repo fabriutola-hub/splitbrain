@@ -1,0 +1,27 @@
+{
+  "input": {
+    "author": "ravi",
+    "message_id": "c08-b",
+    "room": "sales",
+    "text": "I have told customers there will be no price increase until Q2 next year."
+  },
+  "model": "deepseek-ai/DeepSeek-V4.1-Flash-1017",
+  "output": {
+    "claims": [
+      {
+        "confidence": 0.85,
+        "effective_date": null,
+        "kind": "commitment",
+        "polarity": "negate",
+        "scope": "customers",
+        "scope_key": "customers",
+        "subject": "price increase",
+        "subject_key": "pricing",
+        "value": "no increase until Q2 next year"
+      }
+    ],
+    "message_id": "c08-b"
+  },
+  "recorded_at": "2026-11-04T10:08:12+00:00",
+  "task": "extract"
+}

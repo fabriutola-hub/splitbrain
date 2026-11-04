@@ -1,0 +1,27 @@
+{
+  "input": {
+    "author": "priya",
+    "message_id": "c06-b",
+    "room": "product",
+    "text": "The enterprise trial is 14 days in the billing system, not 30 days."
+  },
+  "model": "deepseek-ai/DeepSeek-V4.1-Flash-1017",
+  "output": {
+    "claims": [
+      {
+        "confidence": 0.9,
+        "effective_date": null,
+        "kind": "status",
+        "polarity": "affirm",
+        "scope": "enterprise tier",
+        "scope_key": "enterprise",
+        "subject": "enterprise trial length",
+        "subject_key": "trial-length",
+        "value": "14 days"
+      }
+    ],
+    "message_id": "c06-b"
+  },
+  "recorded_at": "2026-11-04T10:08:06+00:00",
+  "task": "extract"
+}

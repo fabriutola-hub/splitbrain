@@ -1,0 +1,27 @@
+{
+  "input": {
+    "author": "pablo",
+    "message_id": "c12-b",
+    "room": "finance",
+    "text": "The $2,000 onboarding fee is mandatory on all enterprise contracts this quarter."
+  },
+  "model": "deepseek-ai/DeepSeek-V4.1-Flash-1017",
+  "output": {
+    "claims": [
+      {
+        "confidence": 0.9,
+        "effective_date": null,
+        "kind": "policy",
+        "polarity": "affirm",
+        "scope": "enterprise contracts",
+        "scope_key": "enterprise",
+        "subject": "onboarding fee",
+        "subject_key": "onboarding-fee",
+        "value": "USD 2,000 fee mandatory"
+      }
+    ],
+    "message_id": "c12-b"
+  },
+  "recorded_at": "2026-11-04T10:08:28+00:00",
+  "task": "extract"
+}

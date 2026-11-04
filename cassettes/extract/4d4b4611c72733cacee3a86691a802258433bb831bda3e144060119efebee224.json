@@ -1,0 +1,27 @@
+{
+  "input": {
+    "author": "hana",
+    "message_id": "n25-b",
+    "room": "legal",
+    "text": "The new DPA template must be signed by every vendor before Friday."
+  },
+  "model": "deepseek-ai/DeepSeek-V4.1-Flash-1017",
+  "output": {
+    "claims": [
+      {
+        "confidence": 0.85,
+        "effective_date": null,
+        "kind": "policy",
+        "polarity": "affirm",
+        "scope": "vendors",
+        "scope_key": "vendors",
+        "subject": "DPA template signature requirement",
+        "subject_key": "dpa-template",
+        "value": "signed by every vendor before Friday"
+      }
+    ],
+    "message_id": "n25-b"
+  },
+  "recorded_at": "2026-11-04T10:09:40+00:00",
+  "task": "extract"
+}

@@ -1,0 +1,27 @@
+{
+  "input": {
+    "author": "dana",
+    "message_id": "c11-b",
+    "room": "ops",
+    "text": "Support stays weekdays 9 to 5 only; there is no night shift approved."
+  },
+  "model": "deepseek-ai/DeepSeek-V4.1-Flash-1017",
+  "output": {
+    "claims": [
+      {
+        "confidence": 0.85,
+        "effective_date": null,
+        "kind": "status",
+        "polarity": "negate",
+        "scope": "*",
+        "scope_key": "*",
+        "subject": "support hours",
+        "subject_key": "support-hours",
+        "value": "weekdays 9 to 5 only, no night shift approved"
+      }
+    ],
+    "message_id": "c11-b"
+  },
+  "recorded_at": "2026-11-04T10:08:24+00:00",
+  "task": "extract"
+}

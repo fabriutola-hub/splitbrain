@@ -1,0 +1,38 @@
+{
+  "input": {
+    "claim_a": {
+      "author": "pablo",
+      "effective_date": null,
+      "kind": "policy",
+      "polarity": "affirm",
+      "room": "finance",
+      "scope": "*",
+      "scope_key": "*",
+      "subject": "refund approval threshold",
+      "subject_key": "refunds",
+      "text": "Confirmé que los reembolsos mayores a 250 USD requieren aprobación del gerente desde hoy.",
+      "value": "refunds above USD 250 require manager approval"
+    },
+    "claim_b": {
+      "author": "lucia",
+      "effective_date": null,
+      "kind": "policy",
+      "polarity": "negate",
+      "room": "support",
+      "scope": "*",
+      "scope_key": "*",
+      "subject": "refund approval threshold",
+      "subject_key": "refunds",
+      "text": "Aviso a soporte: los reembolsos ya no requieren aprobación del gerente, pueden aprobarlos directamente.",
+      "value": "refunds no longer require manager approval"
+    }
+  },
+  "model": "deepseek-ai/DeepSeek-V4.1-Flash-1017",
+  "output": {
+    "confidence": 0.9,
+    "reason": "Finance says refunds above USD 250 need manager approval while support says refunds no longer need manager approval, same policy scope.",
+    "relation": "contradiction"
+  },
+  "recorded_at": "2026-11-04T10:08:43+00:00",
+  "task": "classify"
+}

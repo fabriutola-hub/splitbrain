@@ -1,0 +1,38 @@
+{
+  "input": {
+    "claim_a": {
+      "author": "pablo",
+      "effective_date": "2026-01-01",
+      "kind": "decision",
+      "polarity": "affirm",
+      "room": "finance",
+      "scope": "*",
+      "scope_key": "*",
+      "subject": "price increase",
+      "subject_key": "pricing",
+      "text": "The 10% price increase goes live on January 1 for every customer.",
+      "value": "10% increase live on 2026-01-01"
+    },
+    "claim_b": {
+      "author": "ravi",
+      "effective_date": null,
+      "kind": "commitment",
+      "polarity": "negate",
+      "room": "sales",
+      "scope": "customers",
+      "scope_key": "customers",
+      "subject": "price increase",
+      "subject_key": "pricing",
+      "text": "I have told customers there will be no price increase until Q2 next year.",
+      "value": "no increase until Q2 next year"
+    }
+  },
+  "model": "deepseek-ai/DeepSeek-V4.1-Flash-1017",
+  "output": {
+    "confidence": 0.9,
+    "reason": "Finance set a 10% increase for January 1 while sales told customers there would be no increase until Q2.",
+    "relation": "contradiction"
+  },
+  "recorded_at": "2026-11-04T10:08:13+00:00",
+  "task": "classify"
+}

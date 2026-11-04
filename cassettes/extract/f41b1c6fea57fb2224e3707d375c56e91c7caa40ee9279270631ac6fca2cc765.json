@@ -1,0 +1,27 @@
+{
+  "input": {
+    "author": "pablo",
+    "message_id": "n05-a",
+    "room": "finance",
+    "text": "The refund approval threshold is $250 for all customers from Monday."
+  },
+  "model": "deepseek-ai/DeepSeek-V4.1-Flash-1017",
+  "output": {
+    "claims": [
+      {
+        "confidence": 0.9,
+        "effective_date": null,
+        "kind": "policy",
+        "polarity": "affirm",
+        "scope": "*",
+        "scope_key": "*",
+        "subject": "refund approval threshold",
+        "subject_key": "refunds",
+        "value": "$250"
+      }
+    ],
+    "message_id": "n05-a"
+  },
+  "recorded_at": "2026-11-04T10:08:56+00:00",
+  "task": "extract"
+}

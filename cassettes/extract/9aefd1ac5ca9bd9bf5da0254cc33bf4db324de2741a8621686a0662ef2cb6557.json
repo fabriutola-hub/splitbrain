@@ -1,0 +1,27 @@
+{
+  "input": {
+    "author": "maria",
+    "message_id": "c10-b",
+    "room": "sales",
+    "text": "I promised Acme net 60 payment terms in their renewal, it is in the draft."
+  },
+  "model": "deepseek-ai/DeepSeek-V4.1-Flash-1017",
+  "output": {
+    "claims": [
+      {
+        "confidence": 0.85,
+        "effective_date": null,
+        "kind": "commitment",
+        "polarity": "affirm",
+        "scope": "Acme",
+        "scope_key": "acme",
+        "subject": "invoice payment terms",
+        "subject_key": "invoice-terms",
+        "value": "net 60"
+      }
+    ],
+    "message_id": "c10-b"
+  },
+  "recorded_at": "2026-11-04T10:08:21+00:00",
+  "task": "extract"
+}

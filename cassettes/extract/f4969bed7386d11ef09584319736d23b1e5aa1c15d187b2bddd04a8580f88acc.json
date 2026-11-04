@@ -1,0 +1,27 @@
+{
+  "input": {
+    "author": "priya",
+    "message_id": "c14-a",
+    "room": "product",
+    "text": "CSV audit log export ships in Q4, it is on the committed roadmap."
+  },
+  "model": "deepseek-ai/DeepSeek-V4.1-Flash-1017",
+  "output": {
+    "claims": [
+      {
+        "confidence": 0.9,
+        "effective_date": null,
+        "kind": "commitment",
+        "polarity": "affirm",
+        "scope": "*",
+        "scope_key": "*",
+        "subject": "CSV audit log export",
+        "subject_key": "csv-audit-log-export",
+        "value": "ships in Q4"
+      }
+    ],
+    "message_id": "c14-a"
+  },
+  "recorded_at": "2026-11-04T10:08:34+00:00",
+  "task": "extract"
+}

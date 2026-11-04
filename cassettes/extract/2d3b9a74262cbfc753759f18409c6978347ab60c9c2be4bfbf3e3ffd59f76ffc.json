@@ -1,0 +1,27 @@
+{
+  "input": {
+    "author": "maria",
+    "message_id": "n07-a",
+    "room": "sales",
+    "text": "Acme gets the SSO beta on December 1, that is confirmed with them."
+  },
+  "model": "deepseek-ai/DeepSeek-V4.1-Flash-1017",
+  "output": {
+    "claims": [
+      {
+        "confidence": 0.95,
+        "effective_date": "2026-12-01",
+        "kind": "commitment",
+        "polarity": "affirm",
+        "scope": "Acme",
+        "scope_key": "acme",
+        "subject": "SSO beta",
+        "subject_key": "sso",
+        "value": "beta on 2026-12-01"
+      }
+    ],
+    "message_id": "n07-a"
+  },
+  "recorded_at": "2026-11-04T10:09:00+00:00",
+  "task": "extract"
+}

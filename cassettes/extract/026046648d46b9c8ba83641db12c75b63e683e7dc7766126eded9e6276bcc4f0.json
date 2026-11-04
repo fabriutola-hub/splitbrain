@@ -1,0 +1,27 @@
+{
+  "input": {
+    "author": "pablo",
+    "message_id": "c02-b",
+    "room": "finance",
+    "text": "Finance policy: every refund above $250 requires manager approval until further notice."
+  },
+  "model": "deepseek-ai/DeepSeek-V4.1-Flash-1017",
+  "output": {
+    "claims": [
+      {
+        "confidence": 0.92,
+        "effective_date": null,
+        "kind": "policy",
+        "polarity": "affirm",
+        "scope": "*",
+        "scope_key": "*",
+        "subject": "refund approval threshold",
+        "subject_key": "refunds",
+        "value": "refunds above $250 require manager approval"
+      }
+    ],
+    "message_id": "c02-b"
+  },
+  "recorded_at": "2026-11-04T10:07:53+00:00",
+  "task": "extract"
+}

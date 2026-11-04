@@ -1,0 +1,27 @@
+{
+  "input": {
+    "author": "sofia",
+    "message_id": "n02-b",
+    "room": "emea-sales",
+    "text": "SSO for Globex is scheduled for Q1, not this quarter."
+  },
+  "model": "deepseek-ai/DeepSeek-V4.1-Flash-1017",
+  "output": {
+    "claims": [
+      {
+        "confidence": 0.9,
+        "effective_date": null,
+        "kind": "commitment",
+        "polarity": "affirm",
+        "scope": "Globex",
+        "scope_key": "globex",
+        "subject": "SSO",
+        "subject_key": "sso",
+        "value": "scheduled for Q1"
+      }
+    ],
+    "message_id": "n02-b"
+  },
+  "recorded_at": "2026-11-04T10:08:52+00:00",
+  "task": "extract"
+}

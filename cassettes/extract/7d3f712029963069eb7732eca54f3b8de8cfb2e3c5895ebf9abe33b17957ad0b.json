@@ -1,0 +1,27 @@
+{
+  "input": {
+    "author": "priya",
+    "message_id": "c15-b",
+    "room": "product",
+    "text": "The enterprise plan includes 25 seats and charges for each extra seat."
+  },
+  "model": "deepseek-ai/DeepSeek-V4.1-Flash-1017",
+  "output": {
+    "claims": [
+      {
+        "confidence": 0.85,
+        "effective_date": null,
+        "kind": "policy",
+        "polarity": "affirm",
+        "scope": "enterprise tier",
+        "scope_key": "enterprise",
+        "subject": "enterprise plan seat count",
+        "subject_key": "enterprise-seats",
+        "value": "25 seats included, extra seats charged"
+      }
+    ],
+    "message_id": "c15-b"
+  },
+  "recorded_at": "2026-11-04T10:08:38+00:00",
+  "task": "extract"
+}

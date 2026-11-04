@@ -1,0 +1,27 @@
+{
+  "input": {
+    "author": "diego",
+    "message_id": "n03-b",
+    "room": "apac-sales",
+    "text": "For Globex, refunds above $250 still require manager approval."
+  },
+  "model": "deepseek-ai/DeepSeek-V4.1-Flash-1017",
+  "output": {
+    "claims": [
+      {
+        "confidence": 0.93,
+        "effective_date": null,
+        "kind": "policy",
+        "polarity": "affirm",
+        "scope": "Globex",
+        "scope_key": "globex",
+        "subject": "refund approval threshold",
+        "subject_key": "refunds",
+        "value": "refunds above $250 still require manager approval"
+      }
+    ],
+    "message_id": "n03-b"
+  },
+  "recorded_at": "2026-11-04T10:08:54+00:00",
+  "task": "extract"
+}

@@ -1,0 +1,38 @@
+{
+  "input": {
+    "claim_a": {
+      "author": "pablo",
+      "effective_date": null,
+      "kind": "policy",
+      "polarity": "affirm",
+      "room": "finance",
+      "scope": "enterprise contracts",
+      "scope_key": "enterprise",
+      "subject": "onboarding fee",
+      "subject_key": "onboarding-fee",
+      "text": "The $2,000 onboarding fee is mandatory on all enterprise contracts this quarter.",
+      "value": "USD 2,000 fee mandatory"
+    },
+    "claim_b": {
+      "author": "ravi",
+      "effective_date": null,
+      "kind": "policy",
+      "polarity": "negate",
+      "room": "sales",
+      "scope": "enterprise deals",
+      "scope_key": "enterprise",
+      "subject": "onboarding fee",
+      "subject_key": "onboarding-fee",
+      "text": "We are waiving the $2,000 onboarding fee for every enterprise deal this quarter.",
+      "value": "USD 2,000 fee waived"
+    }
+  },
+  "model": "deepseek-ai/DeepSeek-V4.1-Flash-1017",
+  "output": {
+    "confidence": 0.93,
+    "reason": "Finance says the $2,000 enterprise onboarding fee is mandatory this quarter while sales says it is waived for every enterprise deal this quarter.",
+    "relation": "contradiction"
+  },
+  "recorded_at": "2026-11-04T10:08:29+00:00",
+  "task": "classify"
+}

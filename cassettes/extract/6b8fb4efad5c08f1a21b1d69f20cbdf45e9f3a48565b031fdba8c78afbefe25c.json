@@ -1,0 +1,27 @@
+{
+  "input": {
+    "author": "maria",
+    "message_id": "n13-b",
+    "room": "sales",
+    "text": "Confirmed with Acme that SSO will be live for them on December 1."
+  },
+  "model": "deepseek-ai/DeepSeek-V4.1-Flash-1017",
+  "output": {
+    "claims": [
+      {
+        "confidence": 0.95,
+        "effective_date": "2026-12-01",
+        "kind": "commitment",
+        "polarity": "affirm",
+        "scope": "Acme",
+        "scope_key": "acme",
+        "subject": "SSO",
+        "subject_key": "sso",
+        "value": "live on 2026-12-01"
+      }
+    ],
+    "message_id": "n13-b"
+  },
+  "recorded_at": "2026-11-04T10:09:15+00:00",
+  "task": "extract"
+}

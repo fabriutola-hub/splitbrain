@@ -1,0 +1,27 @@
+{
+  "input": {
+    "author": "maria",
+    "message_id": "n06-b",
+    "room": "emea-sales",
+    "text": "Corrección a mi mensaje anterior: confirmé SSO con Acme para el 15 de diciembre."
+  },
+  "model": "deepseek-ai/DeepSeek-V4.1-Flash-1017",
+  "output": {
+    "claims": [
+      {
+        "confidence": 0.95,
+        "effective_date": "2026-12-15",
+        "kind": "commitment",
+        "polarity": "affirm",
+        "scope": "Acme",
+        "scope_key": "acme",
+        "subject": "SSO",
+        "subject_key": "sso",
+        "value": "available on 2026-12-15"
+      }
+    ],
+    "message_id": "n06-b"
+  },
+  "recorded_at": "2026-11-04T10:08:58+00:00",
+  "task": "extract"
+}

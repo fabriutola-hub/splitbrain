@@ -1,0 +1,27 @@
+{
+  "input": {
+    "author": "ravi",
+    "message_id": "n22-a",
+    "room": "sales",
+    "text": "Enterprise trials are 14 days, that is what the order form says."
+  },
+  "model": "deepseek-ai/DeepSeek-V4.1-Flash-1017",
+  "output": {
+    "claims": [
+      {
+        "confidence": 0.9,
+        "effective_date": null,
+        "kind": "policy",
+        "polarity": "affirm",
+        "scope": "enterprise tier",
+        "scope_key": "enterprise",
+        "subject": "enterprise trial length",
+        "subject_key": "trial-length",
+        "value": "14 days"
+      }
+    ],
+    "message_id": "n22-a"
+  },
+  "recorded_at": "2026-11-04T10:09:31+00:00",
+  "task": "extract"
+}

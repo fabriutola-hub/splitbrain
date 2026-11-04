@@ -1,0 +1,27 @@
+{
+  "input": {
+    "author": "emma",
+    "message_id": "n21-a",
+    "room": "marketing",
+    "text": "The mobile app beta opens on December 1 for selected customers."
+  },
+  "model": "deepseek-ai/DeepSeek-V4.1-Flash-1017",
+  "output": {
+    "claims": [
+      {
+        "confidence": 0.9,
+        "effective_date": "2026-12-01",
+        "kind": "commitment",
+        "polarity": "affirm",
+        "scope": "selected customers",
+        "scope_key": "selected-customers",
+        "subject": "mobile app beta",
+        "subject_key": "mobile-app-beta",
+        "value": "opens on 2026-12-01"
+      }
+    ],
+    "message_id": "n21-a"
+  },
+  "recorded_at": "2026-11-04T10:09:29+00:00",
+  "task": "extract"
+}

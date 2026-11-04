@@ -1,0 +1,27 @@
+{
+  "input": {
+    "author": "ravi",
+    "message_id": "c12-a",
+    "room": "sales",
+    "text": "We are waiving the $2,000 onboarding fee for every enterprise deal this quarter."
+  },
+  "model": "deepseek-ai/DeepSeek-V4.1-Flash-1017",
+  "output": {
+    "claims": [
+      {
+        "confidence": 0.9,
+        "effective_date": null,
+        "kind": "policy",
+        "polarity": "negate",
+        "scope": "enterprise deals",
+        "scope_key": "enterprise",
+        "subject": "onboarding fee",
+        "subject_key": "onboarding-fee",
+        "value": "USD 2,000 fee waived"
+      }
+    ],
+    "message_id": "c12-a"
+  },
+  "recorded_at": "2026-11-04T10:08:28+00:00",
+  "task": "extract"
+}

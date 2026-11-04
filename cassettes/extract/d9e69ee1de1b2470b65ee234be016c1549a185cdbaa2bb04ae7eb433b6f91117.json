@@ -1,0 +1,15 @@
+{
+  "input": {
+    "author": "lucia",
+    "message_id": "n13-a",
+    "room": "support",
+    "text": "Are we still shipping the December SSO beta to Acme next week?"
+  },
+  "model": "deepseek-ai/DeepSeek-V4.1-Flash-1017",
+  "output": {
+    "claims": [],
+    "message_id": "n13-a"
+  },
+  "recorded_at": "2026-11-04T10:09:15+00:00",
+  "task": "extract"
+}

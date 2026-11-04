@@ -1,0 +1,27 @@
+{
+  "input": {
+    "author": "priya",
+    "message_id": "n09-b",
+    "room": "product",
+    "text": "Enterprise accounts also get a 2000 requests per minute burst allowance."
+  },
+  "model": "deepseek-ai/DeepSeek-V4.1-Flash-1017",
+  "output": {
+    "claims": [
+      {
+        "confidence": 0.9,
+        "effective_date": null,
+        "kind": "policy",
+        "polarity": "affirm",
+        "scope": "enterprise tier",
+        "scope_key": "enterprise",
+        "subject": "API rate limit burst allowance",
+        "subject_key": "api-rate-limits",
+        "value": "2000 requests per minute burst allowance"
+      }
+    ],
+    "message_id": "n09-b"
+  },
+  "recorded_at": "2026-11-04T10:09:06+00:00",
+  "task": "extract"
+}

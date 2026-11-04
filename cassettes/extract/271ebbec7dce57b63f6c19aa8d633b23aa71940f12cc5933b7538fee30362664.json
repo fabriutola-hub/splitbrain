@@ -1,0 +1,27 @@
+{
+  "input": {
+    "author": "owen",
+    "message_id": "c13-a",
+    "room": "engineering",
+    "text": "Webhook delivery now retries failed calls five times before giving up."
+  },
+  "model": "deepseek-ai/DeepSeek-V4.1-Flash-1017",
+  "output": {
+    "claims": [
+      {
+        "confidence": 0.9,
+        "effective_date": null,
+        "kind": "status",
+        "polarity": "affirm",
+        "scope": "*",
+        "scope_key": "*",
+        "subject": "webhook retries",
+        "subject_key": "webhook-retries",
+        "value": "retries failed calls five times"
+      }
+    ],
+    "message_id": "c13-a"
+  },
+  "recorded_at": "2026-11-04T10:08:31+00:00",
+  "task": "extract"
+}

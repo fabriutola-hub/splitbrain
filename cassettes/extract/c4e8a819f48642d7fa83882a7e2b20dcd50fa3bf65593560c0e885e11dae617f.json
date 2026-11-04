@@ -1,0 +1,27 @@
+{
+  "input": {
+    "author": "hana",
+    "message_id": "c17-a",
+    "room": "security",
+    "text": "Backup retention is 90 days for every customer as of January 1."
+  },
+  "model": "deepseek-ai/DeepSeek-V4.1-Flash-1017",
+  "output": {
+    "claims": [
+      {
+        "confidence": 0.9,
+        "effective_date": null,
+        "kind": "policy",
+        "polarity": "affirm",
+        "scope": "*",
+        "scope_key": "*",
+        "subject": "backup retention",
+        "subject_key": "backup-retention",
+        "value": "90 days"
+      }
+    ],
+    "message_id": "c17-a"
+  },
+  "recorded_at": "2026-11-04T10:08:45+00:00",
+  "task": "extract"
+}

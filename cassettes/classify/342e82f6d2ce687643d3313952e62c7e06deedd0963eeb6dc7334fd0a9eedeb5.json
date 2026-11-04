@@ -1,0 +1,38 @@
+{
+  "input": {
+    "claim_a": {
+      "author": "priya",
+      "effective_date": null,
+      "kind": "commitment",
+      "polarity": "affirm",
+      "room": "product",
+      "scope": "enterprise tier",
+      "scope_key": "enterprise",
+      "subject": "enterprise trial extension",
+      "subject_key": "trial-length",
+      "text": "Enterprise trials can be extended by 7 days on request from January.",
+      "value": "7-day extension on request from January"
+    },
+    "claim_b": {
+      "author": "ravi",
+      "effective_date": null,
+      "kind": "policy",
+      "polarity": "affirm",
+      "room": "sales",
+      "scope": "enterprise tier",
+      "scope_key": "enterprise",
+      "subject": "enterprise trial length",
+      "subject_key": "trial-length",
+      "text": "Enterprise trials are 14 days, that is what the order form says.",
+      "value": "14 days"
+    }
+  },
+  "model": "deepseek-ai/DeepSeek-V4.1-Flash-1017",
+  "output": {
+    "confidence": 0.8,
+    "reason": "A 14-day base trial and an optional 7-day extension on request can both be true at once.",
+    "relation": "compatible"
+  },
+  "recorded_at": "2026-11-04T10:09:33+00:00",
+  "task": "classify"
+}

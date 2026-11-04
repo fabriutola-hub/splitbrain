@@ -24,7 +24,6 @@ def test_help_lists_every_command(capsys: pytest.CaptureFixture[str]) -> None:
 @pytest.mark.parametrize(
     ("argv", "milestone"),
     [
-        (["eval"], "M3"),
         (["run", "sentinel"], "M4"),
         (["seed", "sso"], "M4"),
         (["demo"], "M7"),
@@ -35,6 +34,24 @@ def test_stubs_raise_not_implemented(argv: list[str], milestone: str) -> None:
     with pytest.raises(NotImplementedError) as error:
         cli.main(argv)
     assert str(error.value) == milestone
+
+
+def test_eval_dispatch_does_not_load_switch_settings(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[object] = []
+
+    async def fake_run(mode: object) -> None:
+        calls.append(mode)
+
+    monkeypatch.setattr(cli.evaluation, "run", fake_run)
+    monkeypatch.setattr(
+        cli.Settings,
+        "load",
+        classmethod(lambda cls, **kwargs: (_ for _ in ()).throw(AssertionError("no Switch here"))),
+    )
+    assert cli.main(["eval", "--mode", "replay"]) == 0
+    assert calls == ["replay"]
 
 
 def test_bootstrap_dispatch_calls_run(monkeypatch: pytest.MonkeyPatch) -> None:

@@ -1,0 +1,38 @@
+{
+  "input": {
+    "claim_a": {
+      "author": "emma",
+      "effective_date": null,
+      "kind": "commitment",
+      "polarity": "affirm",
+      "room": "marketing",
+      "scope": "*",
+      "scope_key": "*",
+      "subject": "Q4 launch private beta",
+      "subject_key": "q4-launch",
+      "text": "The Q4 launch private beta opens on November 15, invites go out Monday.",
+      "value": "private beta opens on November 15"
+    },
+    "claim_b": {
+      "author": "priya",
+      "effective_date": null,
+      "kind": "commitment",
+      "polarity": "affirm",
+      "room": "product",
+      "scope": "*",
+      "scope_key": "*",
+      "subject": "Q4 launch general availability",
+      "subject_key": "q4-launch",
+      "text": "The Q4 launch reaches general availability on December 15 after the beta.",
+      "value": "general availability on December 15"
+    }
+  },
+  "model": "deepseek-ai/DeepSeek-V4.1-Flash-1017",
+  "output": {
+    "confidence": 0.92,
+    "reason": "A November 15 private beta and a December 15 general availability are two phases of one launch, so both can hold.",
+    "relation": "compatible"
+  },
+  "recorded_at": "2026-11-04T10:09:04+00:00",
+  "task": "classify"
+}

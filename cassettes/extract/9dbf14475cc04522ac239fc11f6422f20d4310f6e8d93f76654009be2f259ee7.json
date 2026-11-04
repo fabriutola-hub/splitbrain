@@ -1,0 +1,27 @@
+{
+  "input": {
+    "author": "pablo",
+    "message_id": "c08-a",
+    "room": "finance",
+    "text": "The 10% price increase goes live on January 1 for every customer."
+  },
+  "model": "deepseek-ai/DeepSeek-V4.1-Flash-1017",
+  "output": {
+    "claims": [
+      {
+        "confidence": 0.9,
+        "effective_date": "2026-01-01",
+        "kind": "decision",
+        "polarity": "affirm",
+        "scope": "*",
+        "scope_key": "*",
+        "subject": "price increase",
+        "subject_key": "pricing",
+        "value": "10% increase live on 2026-01-01"
+      }
+    ],
+    "message_id": "c08-a"
+  },
+  "recorded_at": "2026-11-04T10:08:12+00:00",
+  "task": "extract"
+}

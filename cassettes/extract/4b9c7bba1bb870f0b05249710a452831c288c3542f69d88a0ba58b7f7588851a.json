@@ -1,0 +1,27 @@
+{
+  "input": {
+    "author": "owen",
+    "message_id": "n09-a",
+    "room": "engineering",
+    "text": "The API rate limit is 1000 requests per minute for every account."
+  },
+  "model": "deepseek-ai/DeepSeek-V4.1-Flash-1017",
+  "output": {
+    "claims": [
+      {
+        "confidence": 0.95,
+        "effective_date": null,
+        "kind": "policy",
+        "polarity": "affirm",
+        "scope": "*",
+        "scope_key": "*",
+        "subject": "API rate limit",
+        "subject_key": "api-rate-limits",
+        "value": "1000 requests per minute"
+      }
+    ],
+    "message_id": "n09-a"
+  },
+  "recorded_at": "2026-11-04T10:09:06+00:00",
+  "task": "extract"
+}

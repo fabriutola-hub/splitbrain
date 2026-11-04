@@ -1,0 +1,38 @@
+{
+  "input": {
+    "author": "priya",
+    "message_id": "c04-b",
+    "room": "product",
+    "text": "Product has the Q4 launch scheduled for December 15 and no November release on the calendar."
+  },
+  "model": "deepseek-ai/DeepSeek-V4.1-Flash-1017",
+  "output": {
+    "claims": [
+      {
+        "confidence": 0.9,
+        "effective_date": null,
+        "kind": "status",
+        "polarity": "affirm",
+        "scope": "*",
+        "scope_key": "*",
+        "subject": "Q4 launch date",
+        "subject_key": "q4-launch-date",
+        "value": "December 15"
+      },
+      {
+        "confidence": 0.8,
+        "effective_date": null,
+        "kind": "status",
+        "polarity": "negate",
+        "scope": "*",
+        "scope_key": "*",
+        "subject": "November release",
+        "subject_key": "q4-launch-date",
+        "value": "not on the calendar"
+      }
+    ],
+    "message_id": "c04-b"
+  },
+  "recorded_at": "2026-11-04T10:08:00+00:00",
+  "task": "extract"
+}

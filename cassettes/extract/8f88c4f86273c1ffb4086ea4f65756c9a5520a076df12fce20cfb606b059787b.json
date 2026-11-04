@@ -1,0 +1,27 @@
+{
+  "input": {
+    "author": "priya",
+    "message_id": "n22-b",
+    "room": "product",
+    "text": "Enterprise trials can be extended by 7 days on request from January."
+  },
+  "model": "deepseek-ai/DeepSeek-V4.1-Flash-1017",
+  "output": {
+    "claims": [
+      {
+        "confidence": 0.85,
+        "effective_date": null,
+        "kind": "commitment",
+        "polarity": "affirm",
+        "scope": "enterprise tier",
+        "scope_key": "enterprise",
+        "subject": "enterprise trial extension",
+        "subject_key": "trial-length",
+        "value": "7-day extension on request from January"
+      }
+    ],
+    "message_id": "n22-b"
+  },
+  "recorded_at": "2026-11-04T10:09:31+00:00",
+  "task": "extract"
+}

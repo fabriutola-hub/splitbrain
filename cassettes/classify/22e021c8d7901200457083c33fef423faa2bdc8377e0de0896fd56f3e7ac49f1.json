@@ -1,0 +1,38 @@
+{
+  "input": {
+    "claim_a": {
+      "author": "noah",
+      "effective_date": null,
+      "kind": "decision",
+      "polarity": "affirm",
+      "room": "data",
+      "scope": "EU customers",
+      "scope_key": "eu-customers",
+      "subject": "data residency",
+      "subject_key": "data-region",
+      "text": "EU customer data is being moved to US East for the whole region this quarter.",
+      "value": "moving to US East this quarter"
+    },
+    "claim_b": {
+      "author": "hana",
+      "effective_date": null,
+      "kind": "policy",
+      "polarity": "affirm",
+      "room": "security",
+      "scope": "EU customers",
+      "scope_key": "eu-customers",
+      "subject": "data residency",
+      "subject_key": "data-region",
+      "text": "All EU customer data must stay in the Frankfurt region, that is the compliance commitment.",
+      "value": "data must stay in Frankfurt region"
+    }
+  },
+  "model": "deepseek-ai/DeepSeek-V4.1-Flash-1017",
+  "output": {
+    "confidence": 0.93,
+    "reason": "Data claims EU customer data is moving to US East while security says it must stay in Frankfurt, which cannot both hold.",
+    "relation": "contradiction"
+  },
+  "recorded_at": "2026-11-04T10:08:11+00:00",
+  "task": "classify"
+}

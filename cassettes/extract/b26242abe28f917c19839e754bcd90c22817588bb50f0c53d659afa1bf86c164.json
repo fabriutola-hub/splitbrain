@@ -1,0 +1,27 @@
+{
+  "input": {
+    "author": "sofia",
+    "message_id": "c10-a",
+    "room": "finance",
+    "text": "Standard invoice terms are net 30 for all new contracts starting Monday."
+  },
+  "model": "deepseek-ai/DeepSeek-V4.1-Flash-1017",
+  "output": {
+    "claims": [
+      {
+        "confidence": 0.9,
+        "effective_date": null,
+        "kind": "policy",
+        "polarity": "affirm",
+        "scope": "*",
+        "scope_key": "*",
+        "subject": "invoice payment terms",
+        "subject_key": "invoice-terms",
+        "value": "net 30 for all new contracts"
+      }
+    ],
+    "message_id": "c10-a"
+  },
+  "recorded_at": "2026-11-04T10:08:21+00:00",
+  "task": "extract"
+}

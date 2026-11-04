@@ -1,0 +1,27 @@
+{
+  "input": {
+    "author": "clara",
+    "message_id": "c09-a",
+    "room": "people",
+    "text": "There is a vacation blackout from December 20 to December 31 for the whole company."
+  },
+  "model": "deepseek-ai/DeepSeek-V4.1-Flash-1017",
+  "output": {
+    "claims": [
+      {
+        "confidence": 0.9,
+        "effective_date": null,
+        "kind": "policy",
+        "polarity": "affirm",
+        "scope": "*",
+        "scope_key": "*",
+        "subject": "vacation blackout",
+        "subject_key": "holiday-cover",
+        "value": "December 20 to December 31"
+      }
+    ],
+    "message_id": "c09-a"
+  },
+  "recorded_at": "2026-11-04T10:08:15+00:00",
+  "task": "extract"
+}

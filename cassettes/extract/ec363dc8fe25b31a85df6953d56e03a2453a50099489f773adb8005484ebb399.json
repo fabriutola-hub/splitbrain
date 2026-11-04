@@ -1,0 +1,27 @@
+{
+  "input": {
+    "author": "lucia",
+    "message_id": "c16-b",
+    "room": "support",
+    "text": "Aviso a soporte: los reembolsos ya no requieren aprobación del gerente, pueden aprobarlos directamente."
+  },
+  "model": "deepseek-ai/DeepSeek-V4.1-Flash-1017",
+  "output": {
+    "claims": [
+      {
+        "confidence": 0.85,
+        "effective_date": null,
+        "kind": "policy",
+        "polarity": "negate",
+        "scope": "*",
+        "scope_key": "*",
+        "subject": "refund approval threshold",
+        "subject_key": "refunds",
+        "value": "refunds no longer require manager approval"
+      }
+    ],
+    "message_id": "c16-b"
+  },
+  "recorded_at": "2026-11-04T10:08:41+00:00",
+  "task": "extract"
+}

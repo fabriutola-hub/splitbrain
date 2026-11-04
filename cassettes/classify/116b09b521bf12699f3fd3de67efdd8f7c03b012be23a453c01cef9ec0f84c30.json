@@ -1,0 +1,38 @@
+{
+  "input": {
+    "claim_a": {
+      "author": "dana",
+      "effective_date": null,
+      "kind": "policy",
+      "polarity": "negate",
+      "room": "ops",
+      "scope": "Ops",
+      "scope_key": "ops",
+      "subject": "vacation blackout",
+      "subject_key": "holiday-cover",
+      "text": "Ops has no December freeze; everyone can book leave through the holidays.",
+      "value": "no December freeze; leave bookable through holidays"
+    },
+    "claim_b": {
+      "author": "clara",
+      "effective_date": null,
+      "kind": "policy",
+      "polarity": "affirm",
+      "room": "people",
+      "scope": "*",
+      "scope_key": "*",
+      "subject": "vacation blackout",
+      "subject_key": "holiday-cover",
+      "text": "There is a vacation blackout from December 20 to December 31 for the whole company.",
+      "value": "December 20 to December 31"
+    }
+  },
+  "model": "deepseek-ai/DeepSeek-V4.1-Flash-1017",
+  "output": {
+    "confidence": 0.9,
+    "reason": "Ops says there is no December freeze while People asserts a company-wide blackout Dec 20–31, which covers Ops.",
+    "relation": "contradiction"
+  },
+  "recorded_at": "2026-11-04T10:08:19+00:00",
+  "task": "classify"
+}

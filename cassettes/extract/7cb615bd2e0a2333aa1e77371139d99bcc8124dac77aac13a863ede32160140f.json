@@ -1,0 +1,27 @@
+{
+  "input": {
+    "author": "priya",
+    "message_id": "n07-b",
+    "room": "product",
+    "text": "SSO general availability is planned for Q1, after the December beta."
+  },
+  "model": "deepseek-ai/DeepSeek-V4.1-Flash-1017",
+  "output": {
+    "claims": [
+      {
+        "confidence": 0.85,
+        "effective_date": null,
+        "kind": "commitment",
+        "polarity": "affirm",
+        "scope": "*",
+        "scope_key": "*",
+        "subject": "SSO general availability",
+        "subject_key": "sso",
+        "value": "planned for Q1"
+      }
+    ],
+    "message_id": "n07-b"
+  },
+  "recorded_at": "2026-11-04T10:09:00+00:00",
+  "task": "extract"
+}

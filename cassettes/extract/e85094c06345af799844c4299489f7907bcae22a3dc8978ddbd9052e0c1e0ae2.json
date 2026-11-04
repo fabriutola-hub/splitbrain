@@ -1,0 +1,27 @@
+{
+  "input": {
+    "author": "priya",
+    "message_id": "c13-b",
+    "room": "product",
+    "text": "The spec says webhooks are delivered once with no retries at all."
+  },
+  "model": "deepseek-ai/DeepSeek-V4.1-Flash-1017",
+  "output": {
+    "claims": [
+      {
+        "confidence": 0.85,
+        "effective_date": null,
+        "kind": "policy",
+        "polarity": "negate",
+        "scope": "*",
+        "scope_key": "*",
+        "subject": "webhook retries",
+        "subject_key": "webhook-retries",
+        "value": "delivered once with no retries"
+      }
+    ],
+    "message_id": "c13-b"
+  },
+  "recorded_at": "2026-11-04T10:08:31+00:00",
+  "task": "extract"
+}

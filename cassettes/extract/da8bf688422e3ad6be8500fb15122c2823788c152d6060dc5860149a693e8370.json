@@ -1,0 +1,27 @@
+{
+  "input": {
+    "author": "emma",
+    "message_id": "c18-a",
+    "room": "marketing",
+    "text": "The mobile app launches on December 1, the app store assets are approved."
+  },
+  "model": "deepseek-ai/DeepSeek-V4.1-Flash-1017",
+  "output": {
+    "claims": [
+      {
+        "confidence": 0.9,
+        "effective_date": "2026-12-01",
+        "kind": "commitment",
+        "polarity": "affirm",
+        "scope": "*",
+        "scope_key": "*",
+        "subject": "mobile app launch",
+        "subject_key": "mobile-app-launch",
+        "value": "launches on 2026-12-01"
+      }
+    ],
+    "message_id": "c18-a"
+  },
+  "recorded_at": "2026-11-04T10:08:48+00:00",
+  "task": "extract"
+}

@@ -1,0 +1,38 @@
+{
+  "input": {
+    "claim_a": {
+      "author": "noah",
+      "effective_date": null,
+      "kind": "decision",
+      "polarity": "affirm",
+      "room": "data",
+      "scope": "*",
+      "scope_key": "*",
+      "subject": "backup retention",
+      "subject_key": "backup-retention",
+      "text": "We are cutting backup retention to 30 days across all accounts in January.",
+      "value": "cut to 30 days in January"
+    },
+    "claim_b": {
+      "author": "hana",
+      "effective_date": null,
+      "kind": "policy",
+      "polarity": "affirm",
+      "room": "security",
+      "scope": "*",
+      "scope_key": "*",
+      "subject": "backup retention",
+      "subject_key": "backup-retention",
+      "text": "Backup retention is 90 days for every customer as of January 1.",
+      "value": "90 days"
+    }
+  },
+  "model": "deepseek-ai/DeepSeek-V4.1-Flash-1017",
+  "output": {
+    "confidence": 0.93,
+    "reason": "Data says retention is cut to 30 days in January while security says it is 90 days for every customer as of January 1, mutually exclusive values for the same global scope.",
+    "relation": "contradiction"
+  },
+  "recorded_at": "2026-11-04T10:08:46+00:00",
+  "task": "classify"
+}

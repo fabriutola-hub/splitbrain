@@ -1,0 +1,38 @@
+{
+  "input": {
+    "claim_a": {
+      "author": "priya",
+      "effective_date": null,
+      "kind": "commitment",
+      "polarity": "affirm",
+      "room": "product",
+      "scope": "*",
+      "scope_key": "*",
+      "subject": "SSO general availability",
+      "subject_key": "sso",
+      "text": "SSO general availability is planned for Q1, after the December beta.",
+      "value": "planned for Q1"
+    },
+    "claim_b": {
+      "author": "maria",
+      "effective_date": "2026-12-01",
+      "kind": "commitment",
+      "polarity": "affirm",
+      "room": "sales",
+      "scope": "Acme",
+      "scope_key": "acme",
+      "subject": "SSO beta",
+      "subject_key": "sso",
+      "text": "Acme gets the SSO beta on December 1, that is confirmed with them.",
+      "value": "beta on 2026-12-01"
+    }
+  },
+  "model": "deepseek-ai/DeepSeek-V4.1-Flash-1017",
+  "output": {
+    "confidence": 0.92,
+    "reason": "A December beta for Acme and Q1 general availability are two phases of one rollout, so both can hold.",
+    "relation": "compatible"
+  },
+  "recorded_at": "2026-11-04T10:09:01+00:00",
+  "task": "classify"
+}

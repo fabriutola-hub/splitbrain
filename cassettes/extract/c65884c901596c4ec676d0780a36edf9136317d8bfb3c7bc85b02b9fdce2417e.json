@@ -1,0 +1,27 @@
+{
+  "input": {
+    "author": "emma",
+    "message_id": "n08-a",
+    "room": "marketing",
+    "text": "The Q4 launch private beta opens on November 15, invites go out Monday."
+  },
+  "model": "deepseek-ai/DeepSeek-V4.1-Flash-1017",
+  "output": {
+    "claims": [
+      {
+        "confidence": 0.9,
+        "effective_date": null,
+        "kind": "commitment",
+        "polarity": "affirm",
+        "scope": "*",
+        "scope_key": "*",
+        "subject": "Q4 launch private beta",
+        "subject_key": "q4-launch",
+        "value": "private beta opens on November 15"
+      }
+    ],
+    "message_id": "n08-a"
+  },
+  "recorded_at": "2026-11-04T10:09:03+00:00",
+  "task": "extract"
+}

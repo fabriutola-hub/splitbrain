@@ -1,0 +1,27 @@
+{
+  "input": {
+    "author": "pablo",
+    "message_id": "n03-a",
+    "room": "finance",
+    "text": "For Acme, refunds above $500 no longer need manager approval."
+  },
+  "model": "deepseek-ai/DeepSeek-V4.1-Flash-1017",
+  "output": {
+    "claims": [
+      {
+        "confidence": 0.93,
+        "effective_date": null,
+        "kind": "policy",
+        "polarity": "negate",
+        "scope": "Acme",
+        "scope_key": "acme",
+        "subject": "refund approval threshold",
+        "subject_key": "refunds",
+        "value": "refunds above $500 no longer need manager approval"
+      }
+    ],
+    "message_id": "n03-a"
+  },
+  "recorded_at": "2026-11-04T10:08:54+00:00",
+  "task": "extract"
+}

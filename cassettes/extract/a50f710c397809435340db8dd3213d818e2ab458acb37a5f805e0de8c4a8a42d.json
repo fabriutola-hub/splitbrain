@@ -1,0 +1,27 @@
+{
+  "input": {
+    "author": "lucia",
+    "message_id": "c02-a",
+    "room": "support",
+    "text": "For the record, refunds over $500 do not need manager approval; support can approve them directly."
+  },
+  "model": "deepseek-ai/DeepSeek-V4.1-Flash-1017",
+  "output": {
+    "claims": [
+      {
+        "confidence": 0.9,
+        "effective_date": null,
+        "kind": "policy",
+        "polarity": "negate",
+        "scope": "*",
+        "scope_key": "*",
+        "subject": "refund approval threshold",
+        "subject_key": "refunds",
+        "value": "refunds over $500 do not need manager approval; support can approve directly"
+      }
+    ],
+    "message_id": "c02-a"
+  },
+  "recorded_at": "2026-11-04T10:07:53+00:00",
+  "task": "extract"
+}

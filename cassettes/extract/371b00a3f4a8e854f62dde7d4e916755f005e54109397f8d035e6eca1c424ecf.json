@@ -1,0 +1,38 @@
+{
+  "input": {
+    "author": "emma",
+    "message_id": "c04-a",
+    "room": "marketing",
+    "text": "The Q4 launch is locked for November 15; the press embargo lifts that morning."
+  },
+  "model": "deepseek-ai/DeepSeek-V4.1-Flash-1017",
+  "output": {
+    "claims": [
+      {
+        "confidence": 0.9,
+        "effective_date": null,
+        "kind": "decision",
+        "polarity": "affirm",
+        "scope": "*",
+        "scope_key": "*",
+        "subject": "Q4 launch date",
+        "subject_key": "q4-launch-date",
+        "value": "November 15"
+      },
+      {
+        "confidence": 0.75,
+        "effective_date": null,
+        "kind": "decision",
+        "polarity": "affirm",
+        "scope": "*",
+        "scope_key": "*",
+        "subject": "press embargo",
+        "subject_key": "press-embargo",
+        "value": "lifts on launch morning"
+      }
+    ],
+    "message_id": "c04-a"
+  },
+  "recorded_at": "2026-11-04T10:08:00+00:00",
+  "task": "extract"
+}

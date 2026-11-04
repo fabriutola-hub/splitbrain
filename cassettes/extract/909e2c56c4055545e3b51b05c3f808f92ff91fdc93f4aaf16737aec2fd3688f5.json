@@ -1,0 +1,27 @@
+{
+  "input": {
+    "author": "dana",
+    "message_id": "n10-a",
+    "room": "ops",
+    "text": "The uptime SLA is 99.9% for January, measured monthly."
+  },
+  "model": "deepseek-ai/DeepSeek-V4.1-Flash-1017",
+  "output": {
+    "claims": [
+      {
+        "confidence": 0.9,
+        "effective_date": null,
+        "kind": "policy",
+        "polarity": "affirm",
+        "scope": "*",
+        "scope_key": "*",
+        "subject": "uptime SLA",
+        "subject_key": "uptime-sla",
+        "value": "99.9% for January, measured monthly"
+      }
+    ],
+    "message_id": "n10-a"
+  },
+  "recorded_at": "2026-11-04T10:09:09+00:00",
+  "task": "extract"
+}

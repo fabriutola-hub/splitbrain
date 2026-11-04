@@ -1,0 +1,27 @@
+{
+  "input": {
+    "author": "priya",
+    "message_id": "n24-a",
+    "room": "product",
+    "text": "The audit log CSV export is scoped for the Q4 release."
+  },
+  "model": "deepseek-ai/DeepSeek-V4.1-Flash-1017",
+  "output": {
+    "claims": [
+      {
+        "confidence": 0.85,
+        "effective_date": null,
+        "kind": "commitment",
+        "polarity": "affirm",
+        "scope": "*",
+        "scope_key": "*",
+        "subject": "audit log CSV export",
+        "subject_key": "audit-log-csv-export",
+        "value": "scoped for Q4 release"
+      }
+    ],
+    "message_id": "n24-a"
+  },
+  "recorded_at": "2026-11-04T10:09:37+00:00",
+  "task": "extract"
+}

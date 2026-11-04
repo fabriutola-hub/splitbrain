@@ -7,12 +7,11 @@ import asyncio
 import sys
 from collections.abc import Sequence
 
-from . import bootstrap, stack
+from . import bootstrap, evaluation, stack
 from .config import Settings, SplitbrainError
 
 # Commands that belong to later milestones; they must exist in --help now.
 _STUB_MILESTONES: dict[str, str] = {
-    "eval": "M3",
     "run": "M4",
     "seed": "M4",
     "demo": "M7",
@@ -46,8 +45,13 @@ def build_parser() -> argparse.ArgumentParser:
     demo.add_argument("--auto-decide", action="store_true", help="also post the decision")
 
     commands.add_parser("record", help="refresh the LLM cassettes (M7)")
-    evaluation = commands.add_parser("eval", help="run the labeled eval dataset (M3)")
-    evaluation.add_argument("--mode", choices=["replay", "live"], default="replay")
+    eval_parser = commands.add_parser("eval", help="run the labeled eval dataset (M3)")
+    eval_parser.add_argument(
+        "--mode",
+        choices=["replay", "live", "record"],
+        default=None,
+        help="default: SPLITBRAIN_LLM_MODE, else offline replay",
+    )
     return parser
 
 
@@ -55,6 +59,11 @@ async def _dispatch(args: argparse.Namespace) -> int:
     milestone = _STUB_MILESTONES.get(args.command)
     if milestone:
         raise NotImplementedError(milestone)
+
+    # M3 is Switch-free: eval must work on a clean clone without deploy/.env.
+    if args.command == "eval":
+        await evaluation.run(args.mode)
+        return 0
 
     settings = Settings.load(require_env_file=args.command != "up")
     if args.command == "up":

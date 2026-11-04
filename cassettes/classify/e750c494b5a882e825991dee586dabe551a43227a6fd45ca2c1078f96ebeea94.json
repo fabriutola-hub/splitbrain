@@ -1,0 +1,38 @@
+{
+  "input": {
+    "claim_a": {
+      "author": "owen",
+      "effective_date": null,
+      "kind": "status",
+      "polarity": "affirm",
+      "room": "engineering",
+      "scope": "*",
+      "scope_key": "*",
+      "subject": "webhook retries",
+      "subject_key": "webhook-retries",
+      "text": "Webhook delivery now retries failed calls five times before giving up.",
+      "value": "retries failed calls five times"
+    },
+    "claim_b": {
+      "author": "priya",
+      "effective_date": null,
+      "kind": "policy",
+      "polarity": "negate",
+      "room": "product",
+      "scope": "*",
+      "scope_key": "*",
+      "subject": "webhook retries",
+      "subject_key": "webhook-retries",
+      "text": "The spec says webhooks are delivered once with no retries at all.",
+      "value": "delivered once with no retries"
+    }
+  },
+  "model": "deepseek-ai/DeepSeek-V4.1-Flash-1017",
+  "output": {
+    "confidence": 0.9,
+    "reason": "Engineering says webhooks retry five times while product's spec says single delivery with no retries, which cannot both be true.",
+    "relation": "contradiction"
+  },
+  "recorded_at": "2026-11-04T10:08:32+00:00",
+  "task": "classify"
+}

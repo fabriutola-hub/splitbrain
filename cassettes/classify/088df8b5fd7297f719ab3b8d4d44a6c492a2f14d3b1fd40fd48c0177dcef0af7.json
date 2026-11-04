@@ -1,0 +1,38 @@
+{
+  "input": {
+    "claim_a": {
+      "author": "dana",
+      "effective_date": null,
+      "kind": "commitment",
+      "polarity": "affirm",
+      "room": "ops",
+      "scope": "*",
+      "scope_key": "*",
+      "subject": "uptime SLA",
+      "subject_key": "uptime-sla",
+      "text": "The 99.9% uptime SLA starts in January for every customer.",
+      "value": "99.9% starting in January"
+    },
+    "claim_b": {
+      "author": "lucia",
+      "effective_date": null,
+      "kind": "policy",
+      "polarity": "negate",
+      "room": "support",
+      "scope": "*",
+      "scope_key": "*",
+      "subject": "uptime SLA",
+      "subject_key": "uptime-sla",
+      "text": "The 99.9% SLA excludes a two-hour monthly maintenance window for all customers.",
+      "value": "excludes a two-hour monthly maintenance window"
+    }
+  },
+  "model": "deepseek-ai/DeepSeek-V4.1-Flash-1017",
+  "output": {
+    "confidence": 0.88,
+    "reason": "The 99.9% SLA start date and the maintenance-window exclusion are additive terms of the same policy, both can hold.",
+    "relation": "compatible"
+  },
+  "recorded_at": "2026-11-04T10:09:35+00:00",
+  "task": "classify"
+}

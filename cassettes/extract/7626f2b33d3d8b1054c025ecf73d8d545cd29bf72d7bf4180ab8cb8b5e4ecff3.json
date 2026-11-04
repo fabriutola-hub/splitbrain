@@ -1,0 +1,27 @@
+{
+  "input": {
+    "author": "sofia",
+    "message_id": "n16-b",
+    "room": "ops",
+    "text": "Update from finance: the $250 refund threshold was replaced by $500 on Monday, the old note is void."
+  },
+  "model": "deepseek-ai/DeepSeek-V4.1-Flash-1017",
+  "output": {
+    "claims": [
+      {
+        "confidence": 0.9,
+        "effective_date": null,
+        "kind": "decision",
+        "polarity": "affirm",
+        "scope": "*",
+        "scope_key": "*",
+        "subject": "refund approval threshold",
+        "subject_key": "refunds",
+        "value": "$250 threshold replaced by $500"
+      }
+    ],
+    "message_id": "n16-b"
+  },
+  "recorded_at": "2026-11-04T10:09:21+00:00",
+  "task": "extract"
+}

@@ -1,0 +1,38 @@
+{
+  "input": {
+    "author": "clara",
+    "message_id": "n26-b",
+    "room": "people",
+    "text": "The holiday party is on December 18 and the office closes at 5 pm."
+  },
+  "model": "deepseek-ai/DeepSeek-V4.1-Flash-1017",
+  "output": {
+    "claims": [
+      {
+        "confidence": 0.9,
+        "effective_date": "2026-12-18",
+        "kind": "status",
+        "polarity": "affirm",
+        "scope": "*",
+        "scope_key": "*",
+        "subject": "holiday party",
+        "subject_key": "holiday-cover",
+        "value": "on 2026-12-18"
+      },
+      {
+        "confidence": 0.85,
+        "effective_date": null,
+        "kind": "status",
+        "polarity": "affirm",
+        "scope": "*",
+        "scope_key": "*",
+        "subject": "office closing time",
+        "subject_key": "office-hours",
+        "value": "closes at 5 pm"
+      }
+    ],
+    "message_id": "n26-b"
+  },
+  "recorded_at": "2026-11-04T10:09:42+00:00",
+  "task": "extract"
+}

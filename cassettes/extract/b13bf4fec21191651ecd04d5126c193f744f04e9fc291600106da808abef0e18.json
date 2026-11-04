@@ -1,0 +1,27 @@
+{
+  "input": {
+    "author": "pablo",
+    "message_id": "n05-b",
+    "room": "ops",
+    "text": "Correction to my earlier note: the refund threshold is $500 from Monday, not $250."
+  },
+  "model": "deepseek-ai/DeepSeek-V4.1-Flash-1017",
+  "output": {
+    "claims": [
+      {
+        "confidence": 0.95,
+        "effective_date": null,
+        "kind": "policy",
+        "polarity": "affirm",
+        "scope": "*",
+        "scope_key": "*",
+        "subject": "refund approval threshold",
+        "subject_key": "refunds",
+        "value": "$500"
+      }
+    ],
+    "message_id": "n05-b"
+  },
+  "recorded_at": "2026-11-04T10:08:56+00:00",
+  "task": "extract"
+}

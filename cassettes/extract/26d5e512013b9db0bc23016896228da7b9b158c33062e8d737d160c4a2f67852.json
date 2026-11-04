@@ -1,0 +1,27 @@
+{
+  "input": {
+    "author": "priya",
+    "message_id": "c03-a",
+    "room": "product",
+    "text": "We are raising the public API rate limit to 1000 requests per minute on December 1."
+  },
+  "model": "deepseek-ai/DeepSeek-V4.1-Flash-1017",
+  "output": {
+    "claims": [
+      {
+        "confidence": 0.9,
+        "effective_date": "2026-12-01",
+        "kind": "decision",
+        "polarity": "affirm",
+        "scope": "*",
+        "scope_key": "*",
+        "subject": "API rate limit",
+        "subject_key": "api-rate-limits",
+        "value": "1000 requests per minute"
+      }
+    ],
+    "message_id": "c03-a"
+  },
+  "recorded_at": "2026-11-04T10:07:56+00:00",
+  "task": "extract"
+}

@@ -1,0 +1,38 @@
+{
+  "input": {
+    "claim_a": {
+      "author": "tomas",
+      "effective_date": null,
+      "kind": "decision",
+      "polarity": "negate",
+      "room": "engineering",
+      "scope": "*",
+      "scope_key": "*",
+      "subject": "CSV audit log export",
+      "subject_key": "csv-audit-log-export",
+      "text": "CSV audit log export was cancelled; we are not shipping it this year.",
+      "value": "cancelled, not shipping this year"
+    },
+    "claim_b": {
+      "author": "priya",
+      "effective_date": null,
+      "kind": "commitment",
+      "polarity": "affirm",
+      "room": "product",
+      "scope": "*",
+      "scope_key": "*",
+      "subject": "CSV audit log export",
+      "subject_key": "csv-audit-log-export",
+      "text": "CSV audit log export ships in Q4, it is on the committed roadmap.",
+      "value": "ships in Q4"
+    }
+  },
+  "model": "deepseek-ai/DeepSeek-V4.1-Flash-1017",
+  "output": {
+    "confidence": 0.93,
+    "reason": "Engineering says the CSV audit log export is cancelled for this year while product says it ships in Q4.",
+    "relation": "contradiction"
+  },
+  "recorded_at": "2026-11-04T10:08:36+00:00",
+  "task": "classify"
+}

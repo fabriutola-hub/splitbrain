@@ -1,0 +1,27 @@
+{
+  "input": {
+    "author": "priya",
+    "message_id": "n08-b",
+    "room": "product",
+    "text": "The Q4 launch reaches general availability on December 15 after the beta."
+  },
+  "model": "deepseek-ai/DeepSeek-V4.1-Flash-1017",
+  "output": {
+    "claims": [
+      {
+        "confidence": 0.9,
+        "effective_date": null,
+        "kind": "commitment",
+        "polarity": "affirm",
+        "scope": "*",
+        "scope_key": "*",
+        "subject": "Q4 launch general availability",
+        "subject_key": "q4-launch",
+        "value": "general availability on December 15"
+      }
+    ],
+    "message_id": "n08-b"
+  },
+  "recorded_at": "2026-11-04T10:09:03+00:00",
+  "task": "extract"
+}

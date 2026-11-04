@@ -1,0 +1,38 @@
+{
+  "input": {
+    "claim_a": {
+      "author": "sofia",
+      "effective_date": null,
+      "kind": "policy",
+      "polarity": "affirm",
+      "room": "finance",
+      "scope": "*",
+      "scope_key": "*",
+      "subject": "invoice payment terms",
+      "subject_key": "invoice-terms",
+      "text": "Standard invoice terms are net 30 for all new contracts starting Monday.",
+      "value": "net 30 for all new contracts"
+    },
+    "claim_b": {
+      "author": "maria",
+      "effective_date": null,
+      "kind": "commitment",
+      "polarity": "affirm",
+      "room": "sales",
+      "scope": "Acme",
+      "scope_key": "acme",
+      "subject": "invoice payment terms",
+      "subject_key": "invoice-terms",
+      "text": "I promised Acme net 60 payment terms in their renewal, it is in the draft.",
+      "value": "net 60"
+    }
+  },
+  "model": "deepseek-ai/DeepSeek-V4.1-Flash-1017",
+  "output": {
+    "confidence": 0.9,
+    "reason": "The net 30 policy applies to all new contracts while the net 60 commitment is specific to Acme's renewal, so they cover different scopes.",
+    "relation": "unrelated"
+  },
+  "recorded_at": "2026-11-04T10:08:22+00:00",
+  "task": "classify"
+}

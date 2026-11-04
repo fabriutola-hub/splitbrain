@@ -1,0 +1,27 @@
+{
+  "input": {
+    "author": "ravi",
+    "message_id": "c06-a",
+    "room": "sales",
+    "text": "Enterprise trials are 30 days, I have been quoting that to prospects all week."
+  },
+  "model": "deepseek-ai/DeepSeek-V4.1-Flash-1017",
+  "output": {
+    "claims": [
+      {
+        "confidence": 0.85,
+        "effective_date": null,
+        "kind": "policy",
+        "polarity": "affirm",
+        "scope": "enterprise tier",
+        "scope_key": "enterprise",
+        "subject": "enterprise trial length",
+        "subject_key": "trial-length",
+        "value": "30 days"
+      }
+    ],
+    "message_id": "c06-a"
+  },
+  "recorded_at": "2026-11-04T10:08:06+00:00",
+  "task": "extract"
+}

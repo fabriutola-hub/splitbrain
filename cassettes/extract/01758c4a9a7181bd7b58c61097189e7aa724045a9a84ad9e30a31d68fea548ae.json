@@ -1,0 +1,27 @@
+{
+  "input": {
+    "author": "dana",
+    "message_id": "n23-a",
+    "room": "ops",
+    "text": "The 99.9% uptime SLA starts in January for every customer."
+  },
+  "model": "deepseek-ai/DeepSeek-V4.1-Flash-1017",
+  "output": {
+    "claims": [
+      {
+        "confidence": 0.9,
+        "effective_date": null,
+        "kind": "commitment",
+        "polarity": "affirm",
+        "scope": "*",
+        "scope_key": "*",
+        "subject": "uptime SLA",
+        "subject_key": "uptime-sla",
+        "value": "99.9% starting in January"
+      }
+    ],
+    "message_id": "n23-a"
+  },
+  "recorded_at": "2026-11-04T10:09:34+00:00",
+  "task": "extract"
+}

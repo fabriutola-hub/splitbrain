@@ -1,0 +1,38 @@
+{
+  "input": {
+    "claim_a": {
+      "author": "emma",
+      "effective_date": null,
+      "kind": "decision",
+      "polarity": "affirm",
+      "room": "marketing",
+      "scope": "*",
+      "scope_key": "*",
+      "subject": "Q4 launch date",
+      "subject_key": "q4-launch-date",
+      "text": "The Q4 launch is locked for November 15; the press embargo lifts that morning.",
+      "value": "November 15"
+    },
+    "claim_b": {
+      "author": "priya",
+      "effective_date": null,
+      "kind": "status",
+      "polarity": "affirm",
+      "room": "product",
+      "scope": "*",
+      "scope_key": "*",
+      "subject": "Q4 launch date",
+      "subject_key": "q4-launch-date",
+      "text": "Product has the Q4 launch scheduled for December 15 and no November release on the calendar.",
+      "value": "December 15"
+    }
+  },
+  "model": "deepseek-ai/DeepSeek-V4.1-Flash-1017",
+  "output": {
+    "confidence": 0.93,
+    "reason": "Marketing says the Q4 launch is locked for November 15 while product says it is scheduled for December 15 with no November release.",
+    "relation": "contradiction"
+  },
+  "recorded_at": "2026-11-04T10:08:01+00:00",
+  "task": "classify"
+}
