@@ -478,3 +478,62 @@ async def test_a_duplicate_arbiter_lease_never_creates_two_alerts() -> None:
     await primary._ensure_role()
     assert primary.is_holder is True
     assert "release_role" not in primary_agent.calls
+
+
+# ── Human-decision path (no --auto-decide) ─────────────────────────────────
+
+
+def test_consent_instructions_are_printed_for_private_rooms(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    from splitbrain.config import Settings
+
+    settings = Settings.load(require_env_file=False)
+    state = seed.synthetic_state()
+    stub = SimpleNamespace(paths=SimpleNamespace(root=ROOT))
+    demo.print_consent_instructions(seed.load_scenario(stub, "sso"), state, settings)
+    output = capsys.readouterr().out
+    assert "A person must answer the consent question first" in output
+    assert "@tomas" in output and "reply 'yes'" in output
+    assert "#engineering" in output
+    assert "http://localhost:8065/switch/channels/engineering" in output
+
+
+def test_public_scenario_prints_no_consent_instructions(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    from splitbrain.config import Settings
+
+    settings = Settings.load(require_env_file=False)
+    stub = SimpleNamespace(paths=SimpleNamespace(root=ROOT))
+    demo.print_consent_instructions(
+        seed.load_scenario(stub, "refunds"), seed.synthetic_state(), settings
+    )
+    assert capsys.readouterr().out == ""
+
+
+def test_decision_instructions_name_both_people_and_the_exact_lines(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    from splitbrain.config import Settings
+
+    settings = Settings.load(require_env_file=False)
+    stub = SimpleNamespace(paths=SimpleNamespace(root=ROOT))
+    scenario = seed.load_scenario(stub, "sso")
+    demo.print_decision_instructions(scenario, "conflict-sb-0001-sso", settings)
+    output = capsys.readouterr().out
+    assert "Waiting for a HUMAN decision in #conflict-sb-0001-sso" in output
+    assert "María Gómez (@maria) writes" in output
+    assert "decision: <what you agreed>" in output
+    assert "Tomás Rivera (@tomas) replies" in output
+    assert "      confirm" in output
+    assert "Only those two can close it" in output
+    assert "http://localhost:8065/switch/channels/conflict-sb-0001-sso" in output
+
+
+def test_human_timeouts_cover_the_default_consent_timeout() -> None:
+    # The Arbiter waits 600 s for consent before opening the room; the demo
+    # must wait longer than that for both the room and the human decision.
+    assert demo.HUMAN_CONFLICT_TIMEOUT_S >= 600.0
+    assert demo.HUMAN_DECISION_TIMEOUT_S >= 600.0
+    assert demo.HUMAN_CONFLICT_TIMEOUT_S > demo.CONFLICT_TIMEOUT_S

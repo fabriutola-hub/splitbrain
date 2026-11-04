@@ -45,6 +45,7 @@ COLORS = {"sentinel": "36", "arbiter": "35", "arbiter-b": "34", "verifier": "33"
 RESET = "\x1b[0m"
 AGENTS_READY_TIMEOUT_S = 60.0
 CONFLICT_TIMEOUT_S = 180.0
+HUMAN_CONFLICT_TIMEOUT_S = 900.0  # a person may need to answer consent first
 BRIEF_TIMEOUT_S = 90.0
 HUMAN_DECISION_TIMEOUT_S = 900.0
 PACKET_TIMEOUT_S = 30.0
@@ -437,6 +438,51 @@ def _room_url(settings: Settings, room: str) -> str:
     return f"{settings.mattermost_url}/{team}/channels/{room}"
 
 
+def print_consent_instructions(
+    scenario: seed.Scenario, state: bootstrap.BootstrapState, settings: Settings
+) -> None:
+    """A private quote needs the author's 'yes' BEFORE the conflict room exists."""
+    private = [
+        message
+        for message in scenario.messages
+        if (room := state.rooms.get(message.room)) is not None
+        and room.channel_type == "channel_private"
+    ]
+    if not private:
+        return
+    print("\n" + "-" * 72, flush=True)
+    print("A person must answer the consent question first:", flush=True)
+    for message in private:
+        print(
+            f"  @{message.person}: reply 'yes' to Splitbrain's question in "
+            f"#{message.room} at {_room_url(settings, message.room)}",
+            flush=True,
+        )
+    print("  Without an answer the quote stays withheld after the consent timeout.", flush=True)
+    print("-" * 72 + "\n", flush=True)
+
+
+def print_decision_instructions(
+    scenario: seed.Scenario, conflict_room: str, settings: Settings
+) -> None:
+    """Exactly what the two authors must write in the conflict room."""
+    decision = scenario.decision
+    if decision is None:
+        return
+    people = scenario.people
+    proposer = decision.propose["as"]
+    confirmer = decision.confirm["as"]
+    print("\n" + "-" * 72, flush=True)
+    print(f"Waiting for a HUMAN decision in #{conflict_room}.", flush=True)
+    print(f"  {people.get(proposer, proposer)} (@{proposer}) writes:", flush=True)
+    print("      decision: <what you agreed>", flush=True)
+    print(f"  {people.get(confirmer, confirmer)} (@{confirmer}) replies:", flush=True)
+    print("      confirm", flush=True)
+    print(f"  Only those two can close it. {_room_url(settings, conflict_room)}", flush=True)
+    print("  Press Ctrl+C to stop without deciding.", flush=True)
+    print("-" * 72 + "\n", flush=True)
+
+
 def print_summary(
     *,
     settings: Settings,
@@ -540,10 +586,16 @@ async def run(
         await _wait_for_agents(group, observer, state)
         existing_conflicts = await seed._conflict_rooms(observer)
         result = await seed.run(settings, scenario, auto_decide=effective_auto)
+        if not effective_auto and loaded.decision is not None:
+            # Printed before waiting for the room: consent must be granted first.
+            print_consent_instructions(loaded, state, settings)
         conflict_room = result.conflict_room_name
         if conflict_room is None:
             conflict_room = await _wait_for_conflict(
-                group, observer, existing_conflicts, CONFLICT_TIMEOUT_S
+                group,
+                observer,
+                existing_conflicts,
+                CONFLICT_TIMEOUT_S if effective_auto else HUMAN_CONFLICT_TIMEOUT_S,
             )
         _, brief = await _wait_for_brief(group, observer, conflict_room, BRIEF_TIMEOUT_S)
 
@@ -559,20 +611,7 @@ async def run(
             corrections = list(corrected.get("rooms", []))
             note = "full loop closed by --auto-decide (decision + corrections)"
         elif loaded.decision is not None:
-            people = loaded.people
-            proposer = loaded.decision.propose["as"]
-            confirmer = loaded.decision.confirm["as"]
-            print("\n" + "-" * 72, flush=True)
-            print(f"Waiting for a HUMAN decision in #{conflict_room}.", flush=True)
-            print(f"  {people.get(proposer, proposer)} (@{proposer}) writes:", flush=True)
-            print("      decision: <what you agreed>", flush=True)
-            print(f"  {people.get(confirmer, confirmer)} (@{confirmer}) replies:", flush=True)
-            print("      confirm", flush=True)
-            print(
-                f"  Only those two can close it. {_room_url(settings, conflict_room)}", flush=True
-            )
-            print("  Press Ctrl+C to stop without deciding.", flush=True)
-            print("-" * 72 + "\n", flush=True)
+            print_decision_instructions(loaded, conflict_room, settings)
             await _wait_for_packet(group, observer, ops_id, "corrected", HUMAN_DECISION_TIMEOUT_S)
             decided = await _ops_packet(observer, ops_id, "decided")
             decision = decided.get("decision", {}) if decided else None
