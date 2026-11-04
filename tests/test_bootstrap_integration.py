@@ -21,7 +21,7 @@ async def test_bootstrap_provisions_the_acme_group_once() -> None:
     state = await bootstrap.run(settings)  # idempotent: safe after the CLI ran it
 
     assert set(state.agents) == set(bootstrap.AGENT_NAMES)
-    assert set(state.rooms) == set(bootstrap.ALL_ROOMS)
+    assert set(state.rooms) == set(bootstrap.STATE_ROOMS)
     assert state.group == "Acme"
     assert state.reference is not None and state.reference.name == "Acme roadmap"
     assert state.mattermost is not None
@@ -32,13 +32,16 @@ async def test_bootstrap_provisions_the_acme_group_once() -> None:
     try:
         all_rooms = await agent.op("list_all_rooms", connection=False)
         names = [str(room["name"]) for room in all_rooms]
-        for name in bootstrap.ALL_ROOMS:
+        for name in bootstrap.STATE_ROOMS:
             assert names.count(name) == 1, f"duplicate room {name}"
 
-        for room in state.rooms.values():
+        for name, room in state.rooms.items():
             detail = await agent.op("get_room_detail", room_id=room.room_id, connection=False)
             assert detail["channel_type"] == room.channel_type
-            assert detail["group_name"] == "Acme"
+            expected_group = (
+                bootstrap.HACKATHON_GROUP if name in bootstrap.HACKATHON_ROOMS else "Acme"
+            )
+            assert detail["group_name"] == expected_group
         engineering = await agent.op(
             "get_room_detail", room_id=state.rooms["engineering"].room_id, connection=False
         )

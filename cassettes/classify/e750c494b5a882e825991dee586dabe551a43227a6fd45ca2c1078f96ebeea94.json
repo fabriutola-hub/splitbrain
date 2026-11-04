@@ -33,6 +33,6 @@
     "reason": "Engineering says webhooks retry five times while product's spec says single delivery with no retries, which cannot both be true.",
     "relation": "contradiction"
   },
-  "recorded_at": "2026-11-04T10:08:32+00:00",
+  "recorded_at": "2026-11-04T13:42:15+00:00",
   "task": "classify"
 }

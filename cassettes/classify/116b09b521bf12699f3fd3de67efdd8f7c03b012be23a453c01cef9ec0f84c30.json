@@ -30,9 +30,9 @@
   "model": "deepseek-ai/DeepSeek-V4.1-Flash-1017",
   "output": {
     "confidence": 0.9,
-    "reason": "Ops says there is no December freeze while People asserts a company-wide blackout Dec 20–31, which covers Ops.",
+    "reason": "Ops says no December freeze while People asserts a company-wide blackout Dec 20-31, which covers Ops.",
     "relation": "contradiction"
   },
-  "recorded_at": "2026-11-04T10:08:19+00:00",
+  "recorded_at": "2026-11-04T13:42:03+00:00",
   "task": "classify"
 }

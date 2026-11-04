@@ -1,0 +1,27 @@
+{
+  "input": {
+    "author": "lucia",
+    "message_id": "refunds-0",
+    "room": "support",
+    "text": "Quick reminder for the desk: customer refunds above $500 are still fine to approve ourselves, no manager sign-off needed."
+  },
+  "model": "deepseek-ai/DeepSeek-V4.1-Flash-1017",
+  "output": {
+    "claims": [
+      {
+        "confidence": 0.9,
+        "effective_date": null,
+        "kind": "policy",
+        "polarity": "affirm",
+        "scope": "*",
+        "scope_key": "*",
+        "subject": "refund approval threshold",
+        "subject_key": "refunds",
+        "value": "refunds above $500 can be approved without manager sign-off"
+      }
+    ],
+    "message_id": "refunds-0"
+  },
+  "recorded_at": "2026-11-04T13:43:39+00:00",
+  "task": "extract"
+}

@@ -17,11 +17,11 @@
         "scope_key": "enterprise",
         "subject": "onboarding fee",
         "subject_key": "onboarding-fee",
-        "value": "USD 2,000 fee mandatory"
+        "value": "USD 2,000 fee mandatory this quarter"
       }
     ],
     "message_id": "c12-b"
   },
-  "recorded_at": "2026-11-04T10:08:28+00:00",
+  "recorded_at": "2026-11-04T13:42:10+00:00",
   "task": "extract"
 }

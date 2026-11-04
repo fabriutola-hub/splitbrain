@@ -14,7 +14,6 @@ import logging
 import os
 import re
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
 from typing import Any
 
 from .. import bootstrap
@@ -38,6 +37,7 @@ from ..core.protocol import (
     VerdictPacket,
     read_packet,
 )
+from ..core.timefmt import stamp, zone_label
 from ..switch.client import SwitchAgent, SwitchOpError
 from ..switch.events import (
     ConnectionStateFrame,
@@ -76,11 +76,6 @@ def _env_timeout(name: str, default: float) -> float:
     return value
 
 
-def _stamp(ts: int) -> str:
-    moment = datetime.fromtimestamp(ts / 1000, UTC) if ts > 0 else datetime.now(UTC)
-    return f"{moment.strftime('%b')} {moment.day} {moment.strftime('%H:%M')}"
-
-
 def _slug(text: str) -> str:
     return re.sub(r"[^a-z0-9]+", "-", text.casefold()).strip("-") or "subject"
 
@@ -107,8 +102,7 @@ def _quote(claim: PacketClaim, consents: dict[str, ConsentPacket]) -> str:
 def _claim_line(claim: PacketClaim, consents: dict[str, ConsentPacket]) -> str:
     private = " (private)" if claim.channel_type == "channel_private" else ""
     return (
-        f"#{claim.room_name}{private}, {claim.author}, {_stamp(claim.ts)}: "
-        f"{_quote(claim, consents)}"
+        f"#{claim.room_name}{private}, {claim.author}, {stamp(claim.ts)}: {_quote(claim, consents)}"
     )
 
 
@@ -214,38 +208,70 @@ class Arbiter:
             except TimeoutError:
                 pass
 
-    async def _ensure_role(self) -> None:
+    async def _lease_holders(self) -> list[str]:
+        detail = await self.agent.op("get_room_detail", room_id=self.ops_room_id, connection=False)
+        holders: list[str] = []
+        for role in detail.get("roles", []):
+            if role.get("name") != ARBITER_ROLE:
+                continue
+            for holder in role.get("held_by") or []:
+                holders.append(str(holder.get("name") if isinstance(holder, dict) else holder))
+        return sorted(holders)
+
+    async def _claim_lease(self) -> bool:
+        """Re-read the exclusive lease and resolve the server's startup race.
+
+        Switch 0.31.0 grants `assume_role` to two agents that call it at the
+        same instant (scripts/probe_arbiter_lease.py, SWITCH_NOTES "Verified in
+        M7"). Only the alphabetically first holder may act; any other holder
+        calls `release_role` (which releases only its own lease) and returns to
+        standby. Called before acting on EVERY candidate, not just at startup.
+        """
         async with self._role_lock:
-            detail = await self.agent.op(
-                "get_room_detail", room_id=self.ops_room_id, connection=False
-            )
-            holders: list[str] = []
-            for role in detail.get("roles", []):
-                if role.get("name") != ARBITER_ROLE:
-                    continue
-                for holder in role.get("held_by") or []:
-                    holders.append(str(holder.get("name") if isinstance(holder, dict) else holder))
-            if self.name in holders:
-                if not self.is_holder:
-                    logger.info("%s now holds the exclusive arbiter lease", self.name)
-                self.is_holder = True
-                await self._drain_deferred()
-                return
-            self.is_holder = False
-            try:
-                async with self.agent.act_in(self.ops_room_id):
-                    await self.agent.op("assume_role", role=ARBITER_ROLE)
-            except SwitchOpError as exc:
-                if "exclusive" not in exc.body.casefold():
-                    raise
-                logger.info(
-                    "Standby: arbiter lease held by another agent (HTTP %s); retrying in %.0fs",
-                    exc.status,
-                    ROLE_RETRY_S,
+            holders = await self._lease_holders()
+            if self.name not in holders:
+                try:
+                    async with self.agent.act_in(self.ops_room_id):
+                        await self.agent.op("assume_role", role=ARBITER_ROLE)
+                except SwitchOpError as exc:
+                    if "exclusive" not in exc.body.casefold():
+                        raise
+                    logger.info(
+                        "Standby: arbiter lease held by another agent (HTTP %s); retrying in %.0fs",
+                        exc.status,
+                        ROLE_RETRY_S,
+                    )
+                    self.is_holder = False
+                    return False
+                # Re-read AFTER assuming: another agent may have won the race too.
+                holders = await self._lease_holders()
+            if len(holders) > 1:
+                winner = holders[0]
+                if self.name != winner:
+                    logger.warning(
+                        "Duplicate exclusive arbiter lease %s: @%s releases its own lease "
+                        "and stands by for @%s",
+                        holders,
+                        self.name,
+                        winner,
+                    )
+                    async with self.agent.act_in(self.ops_room_id):
+                        await self.agent.op("release_role")
+                    self.is_holder = False
+                    return False
+                logger.warning(
+                    "Duplicate exclusive arbiter lease %s: @%s keeps it (alphabetically first)",
+                    holders,
+                    self.name,
                 )
-                return
             self.is_holder = True
-            logger.info("%s assumed the exclusive arbiter lease", self.name)
+            return True
+
+    async def _ensure_role(self) -> None:
+        was_holder = self.is_holder
+        if await self._claim_lease():
+            if not was_holder:
+                logger.info("%s now holds the exclusive arbiter lease", self.name)
             await self._drain_deferred()
 
     async def _drain_deferred(self) -> None:
@@ -349,7 +375,9 @@ class Arbiter:
         if candidate.id in self.seen_candidates:
             logger.info("Candidate %s already handled; ignoring", candidate.id)
             return
-        if not self.is_holder:
+        # Re-check the lease for every candidate: a duplicate holder must never
+        # open a second conflict room, even if the startup race was missed.
+        if not await self._claim_lease():
             logger.info("Standby: deferring candidate %s (not the lease holder)", candidate.id)
             self.deferred.append((frame, candidate))
             return
@@ -386,6 +414,8 @@ class Arbiter:
         logger.info("Candidate %s: evidence requested from the verifier", candidate.id)
 
     async def _on_evidence(self, frame: MessageFrame, evidence: Evidence) -> None:
+        if not self.is_holder:
+            return
         if frame.payload.sender_name != "splitbrain-verifier":
             logger.warning("Ignoring evidence from %s", frame.payload.sender_name)
             return
@@ -478,6 +508,8 @@ class Arbiter:
         logger.warning("Candidate %s discarded: %s", verification.candidate.id, reason)
 
     async def _on_consent(self, consent: ConsentPacket) -> None:
+        if not self.is_holder:
+            return
         verification = self.verifications.get(consent.candidate_id)
         if verification is None or verification.finished or verification.room_id is not None:
             return
@@ -495,29 +527,93 @@ class Arbiter:
 
     # ── Conflict room ──────────────────────────────────────────────────────
 
+    async def _find_conflict_room(self, room_name: str) -> str | None:
+        """Idempotency: a candidate id maps to exactly one conflict room."""
+        rooms = await self.agent.op("list_all_rooms", connection=False)
+        entries = rooms if isinstance(rooms, list) else rooms.get("rooms", [])
+        matches = [str(entry["room_id"]) for entry in entries if entry.get("name") == room_name]
+        if len(matches) > 1:
+            logger.warning(
+                "%d rooms named #%s already exist; reusing %s (defence against a "
+                "previous duplicate, not a substitute for the lease check)",
+                len(matches),
+                room_name,
+                matches[0][:8],
+            )
+        return matches[0] if matches else None
+
+    async def _adopt_provisioned_room(self, verification: Verification, room_id: str) -> bool:
+        """If the room already has a brief, adopt its record instead of redoing it."""
+        context = await self.agent.op("read_context", room_id=room_id, limit=60, connection=False)
+        bodies = [
+            str(entry.get("body", ""))
+            for thread in context.get("threads", [])
+            for entry in [thread.get("root", {}), *(thread.get("replies") or [])]
+        ]
+        if not any("Splitbrain found two statements" in body for body in bodies):
+            return False
+        joined = await self.agent.op("connect_to_room", room_id=room_id)
+        name = f"{verification.candidate.id.upper()} decision record"
+        documents = joined.get("documents") or []
+        document_id = next(
+            (
+                str(document["id"])
+                for document in documents
+                if document.get("id") and str(document.get("name", "")) == name
+            ),
+            None,
+        )
+        if document_id is None:
+            raise SplitbrainError(
+                f"#{verification.room_name} already has a brief but no {name!r} document; "
+                "refusing to create a duplicate decision record."
+            )
+        loaded = await self.agent.op("load_internal_documents", ids=[document_id])
+        verification.document_id = document_id
+        verification.record = "\n".join(str(item.get("content", "")) for item in loaded)
+        verification.link_labels = [
+            str(link["label"]) for link in joined.get("linked_rooms", []) if link.get("label")
+        ]
+        verification.machine = DecisionMachine(*[claim.author for claim in verification.claims])
+        logger.warning(
+            "Reused #%s: brief and decision record already exist; nothing was duplicated.",
+            verification.room_name,
+        )
+        return True
+
     async def _open_conflict(self, verification: Verification) -> None:
-        if verification.room_id is not None or verification.finished:
+        if not self.is_holder or verification.room_id is not None or verification.finished:
             return
         candidate = verification.candidate
         a, b = candidate.claims
         room_name = f"conflict-{candidate.id}-{_slug(a.subject_key)}"
         verification.room_name = room_name
-        created = await self.agent.op(
-            "create_room",
-            name=room_name,
-            description=f"Conflict {candidate.id}: {a.subject} for {a.scope}",
-            agent_names=[AGENT_NAME, SENTINEL_NAME],
-            user_names=[a.author, b.author],
-            channel_type="channel_public",
-            instructions=(
-                "Only the two claim authors may close this conflict. One writes "
-                "'decision: <text>' and the other replies 'confirm'. The Arbiter "
-                "records their words verbatim and never picks a winner."
-            ),
-        )
-        room_id = str(created.get("id") or created.get("room_id") or "")
-        if not room_id:
-            raise SplitbrainError(f"create_room for {room_name} returned no room id: {created}")
+        existing = await self._find_conflict_room(room_name)
+        if existing is not None:
+            room_id = existing
+            logger.warning(
+                "Conflict room #%s already exists (id %s); reusing it instead of "
+                "creating a duplicate.",
+                room_name,
+                room_id[:8],
+            )
+        else:
+            created = await self.agent.op(
+                "create_room",
+                name=room_name,
+                description=f"Conflict {candidate.id}: {a.subject} for {a.scope}",
+                agent_names=[AGENT_NAME, SENTINEL_NAME],
+                user_names=[a.author, b.author],
+                channel_type="channel_public",
+                instructions=(
+                    "Only the two claim authors may close this conflict. One writes "
+                    "'decision: <text>' and the other replies 'confirm'. The Arbiter "
+                    "records their words verbatim and never picks a winner."
+                ),
+            )
+            room_id = str(created.get("id") or created.get("room_id") or "")
+            if not room_id:
+                raise SplitbrainError(f"create_room for {room_name} returned no room id: {created}")
         verification.room_id = room_id
         self.coverage.rooms[room_id] = room_name
         self.by_room[room_id] = candidate.id
@@ -532,6 +628,8 @@ class Arbiter:
             )
             for claim in candidate.claims
         ]
+        if existing is not None and await self._adopt_provisioned_room(verification, room_id):
+            return
         verification.link_labels = await self._link_origins(verification)
         verification.record = self._open_record(verification)
         # Claim the room: new rooms are not covered by the stream on their own.
@@ -547,11 +645,12 @@ class Arbiter:
         verification.machine = DecisionMachine(a.author, b.author)
         await self.agent.post(room_id, self._brief(verification))
         logger.info(
-            "Conflict room #%s created for %s (document %s, links %s)",
+            "Conflict room #%s ready for %s (document %s, links %s, reused=%s)",
             room_name,
             candidate.id,
             verification.document_id[:8],
             verification.link_labels,
+            existing is not None,
         )
 
     async def _link_origins(self, verification: Verification) -> list[str]:
@@ -560,8 +659,15 @@ class Arbiter:
             LinkTarget(room_id=claim.room_id, label=claim.origin_label)
             for claim in verification.claims
         ]
+        joined = await self.agent.op("connect_to_room", room_id=room_id)
+        present = {
+            str(link["label"]) for link in joined.get("linked_rooms", []) if link.get("label")
+        }
         labels: list[str] = []
         for target in targets:
+            if target.label in present:
+                labels.append(target.label)
+                continue
             try:
                 await self.agent.op(
                     "link_rooms",
@@ -621,6 +727,11 @@ class Arbiter:
         candidate = verification.candidate
         a, b = candidate.claims
         evidence = verification.evidence
+        evidence_line = (
+            f"Evidence ({evidence.source}): {evidence.detail or evidence.summary}"
+            if evidence
+            else "Evidence (none): no independent evidence"
+        )
         lines = [
             f"{candidate.id.upper()} decision record",
             "",
@@ -628,19 +739,18 @@ class Arbiter:
             f"Subject: {a.subject} (scope: {a.scope})",
             f"Classifier confidence: {candidate.confidence:.2f}",
             "",
-            f"Claim A - #{a.room_name}, {a.author}, {_stamp(a.ts)}",
+            f"Claim A - #{a.room_name}, {a.author}, {stamp(a.ts)}",
             f"  {_quote(a, verification.consents)}",
             f"  Origin message: {a.message_id} / thread {a.thread_root}",
             "",
             f"Claim B - #{b.room_name}"
             + (" (private)" if b.channel_type == "channel_private" else "")
-            + f", {b.author}, {_stamp(b.ts)}",
+            + f", {b.author}, {stamp(b.ts)}",
             f"  {_quote(b, verification.consents)}",
             f"  Subject: {b.subject}. Extracted value: {b.value}.",
             f"  Origin message: {b.message_id} / thread {b.thread_root}",
             "",
-            f"Evidence ({evidence.source if evidence else 'none'}): "
-            f"{evidence.summary if evidence else 'no independent evidence'}",
+            evidence_line,
             f"Links: {', '.join(verification.link_labels) or 'none'}",
             "",
             f"Decision protocol: only @{a.author} and @{b.author} can close this conflict.",
@@ -660,7 +770,7 @@ class Arbiter:
                 _claim_line(a, verification.consents),
                 _claim_line(b, verification.consents),
                 "",
-                f"Evidence (GitHub, {self._repo_label(evidence)}): {summary}",
+                f"Evidence ({self._source_label(evidence)}): {summary}",
                 "",
                 "You two decide. When you agree, one of you writes:  decision: <what you agreed>",
                 "and the other replies:  confirm",
@@ -669,11 +779,17 @@ class Arbiter:
         )
 
     @staticmethod
-    def _repo_label(evidence: Evidence | None) -> str:
-        if evidence is None or not evidence.items:
-            return "Acme roadmap"
-        url = evidence.items[0].url
-        return "/".join(url.split("/")[3:5]) if "github.com" in url else "Acme roadmap"
+    def _source_label(evidence: Evidence | None) -> str:
+        """Name the source exactly once; the summary no longer repeats it."""
+        if evidence is None:
+            return "none"
+        if evidence.source == "scenario_fixture":
+            return "scenario fixture, Flip the Switch public pages"
+        if evidence.source in ("github", "fixture") and evidence.items:
+            url = evidence.items[0].url
+            if "github.com" in url:
+                return f"GitHub, {'/'.join(url.split('/')[3:5])}"
+        return "GitHub, Acme roadmap"
 
     # ── Decision protocol ──────────────────────────────────────────────────
 
@@ -790,6 +906,7 @@ def build_runtime(
             f"{ROLE_RETRY_S:.0f}s)",
             f"Consent timeout: {consent_timeout_s:.0f}s (SPLITBRAIN_CONSENT_TIMEOUT_S)",
             f"Evidence timeout: {evidence_timeout_s:.0f}s (SPLITBRAIN_EVIDENCE_TIMEOUT_S)",
+            f"Brief times: {zone_label()} — set SPLITBRAIN_TZ=America/Caracas for local hours",
             "Silent by default: this agent never posts in team rooms.",
         ],
     )

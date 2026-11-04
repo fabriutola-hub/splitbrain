@@ -33,6 +33,6 @@
     "reason": "The second message explicitly states the $250 threshold was replaced by $500 and the old note is void.",
     "relation": "update"
   },
-  "recorded_at": "2026-11-04T10:09:23+00:00",
+  "recorded_at": "2026-11-04T13:43:12+00:00",
   "task": "classify"
 }

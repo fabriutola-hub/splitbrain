@@ -1,15 +1,15 @@
 {
   "input": {
     "author": "pablo",
-    "message_id": "sw_4610c95520c051dceb3e0695b44cebfa",
+    "message_id": "near-misses-6",
     "room": "finance",
     "text": "If we delayed the admin console GA to Q2, support load might spike, but nothing has been decided yet."
   },
   "model": "deepseek-ai/DeepSeek-V4.1-Flash-1017",
   "output": {
     "claims": [],
-    "message_id": "sw_4610c95520c051dceb3e0695b44cebfa"
+    "message_id": "near-misses-6"
   },
-  "recorded_at": "2026-11-04T12:25:21+00:00",
+  "recorded_at": "2026-11-04T13:43:48+00:00",
   "task": "extract"
 }

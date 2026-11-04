@@ -1,0 +1,13 @@
+name: refunds
+people: {lucia: "Lucía Pérez", pablo: "Pablo Ruiz", maria: "María Gómez"}
+# Support keeps quoting the old $500 rule; finance changed the threshold to $250
+# (issue #5 of fabriutola-hub/splitbrain-demo-roadmap is the independent evidence).
+# Wording is deliberately unlike every line of eval/dataset.jsonl: the semantic
+# extraction cache is keyed by normalized message text.
+messages:
+  - {room: support, as: lucia, after_s: 0, text: "Quick reminder for the desk: customer refunds above $500 are still fine to approve ourselves, no manager sign-off needed."}
+  - {room: sales, as: maria, after_s: 2, text: "The help centre article about password resets is scheduled for Thursday."}
+  - {room: finance, as: pablo, after_s: 2, text: "Policy update from finance: as of this week the manager-approval threshold is $250, so anything above $250 needs my OK."}
+decision:            # used by --auto-decide
+  propose: {as: lucia, text: "decision: Refunds above $250 need manager approval; I'll retire the $500 macro today."}
+  confirm: {as: pablo, text: "confirm"}

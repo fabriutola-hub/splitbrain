@@ -1,7 +1,7 @@
 {
   "input": {
     "author": "maria",
-    "message_id": "sw_81d491e00a7b3b8af6d918bddd96c454",
+    "message_id": "near-misses-0",
     "room": "sales",
     "text": "We promised Acme a 99.9% uptime SLA beginning in January, signed off yesterday."
   },
@@ -17,11 +17,11 @@
         "scope_key": "acme",
         "subject": "uptime SLA",
         "subject_key": "uptime-sla",
-        "value": "99.9% uptime starting in January"
+        "value": "99.9% uptime SLA beginning January"
       }
     ],
-    "message_id": "sw_81d491e00a7b3b8af6d918bddd96c454"
+    "message_id": "near-misses-0"
   },
-  "recorded_at": "2026-11-04T12:25:09+00:00",
+  "recorded_at": "2026-11-04T13:43:48+00:00",
   "task": "extract"
 }

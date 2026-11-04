@@ -13,15 +13,15 @@
         "effective_date": null,
         "kind": "policy",
         "polarity": "affirm",
-        "scope": "vendors",
-        "scope_key": "vendors",
-        "subject": "DPA template signature requirement",
+        "scope": "*",
+        "scope_key": "*",
+        "subject": "DPA template signing requirement",
         "subject_key": "dpa-template",
-        "value": "signed by every vendor before Friday"
+        "value": "new DPA template must be signed by every vendor before Friday"
       }
     ],
     "message_id": "n25-b"
   },
-  "recorded_at": "2026-11-04T10:09:40+00:00",
+  "recorded_at": "2026-11-04T13:43:31+00:00",
   "task": "extract"
 }

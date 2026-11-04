@@ -30,9 +30,9 @@
   "model": "deepseek-ai/DeepSeek-V4.1-Flash-1017",
   "output": {
     "confidence": 0.9,
-    "reason": "The 1000 rpm base limit and the 2000 rpm enterprise burst allowance are additive limits that can both hold.",
+    "reason": "The 1000 rpm base limit applies to all accounts while the 2000 rpm burst is an additive allowance for enterprise, so both can hold.",
     "relation": "compatible"
   },
-  "recorded_at": "2026-11-04T10:09:08+00:00",
+  "recorded_at": "2026-11-04T13:42:55+00:00",
   "task": "classify"
 }

@@ -33,6 +33,6 @@
     "reason": "Finance requires manager approval above $250 while support says refunds over $500 need no manager approval, so the same refunds cannot satisfy both policies.",
     "relation": "contradiction"
   },
-  "recorded_at": "2026-11-04T10:07:54+00:00",
+  "recorded_at": "2026-11-04T13:41:41+00:00",
   "task": "classify"
 }

@@ -1,0 +1,27 @@
+{
+  "input": {
+    "author": "pablo",
+    "message_id": "refunds-2",
+    "room": "finance",
+    "text": "Policy update from finance: as of this week the manager-approval threshold is $250, so anything above $250 needs my OK."
+  },
+  "model": "deepseek-ai/DeepSeek-V4.1-Flash-1017",
+  "output": {
+    "claims": [
+      {
+        "confidence": 0.92,
+        "effective_date": null,
+        "kind": "policy",
+        "polarity": "affirm",
+        "scope": "*",
+        "scope_key": "*",
+        "subject": "refund approval threshold",
+        "subject_key": "refunds",
+        "value": "manager approval required above $250"
+      }
+    ],
+    "message_id": "refunds-2"
+  },
+  "recorded_at": "2026-11-04T13:43:39+00:00",
+  "task": "extract"
+}

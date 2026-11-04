@@ -1,0 +1,38 @@
+{
+  "input": {
+    "claim_a": {
+      "author": "pablo",
+      "effective_date": null,
+      "kind": "policy",
+      "polarity": "affirm",
+      "room": "finance",
+      "scope": "*",
+      "scope_key": "*",
+      "subject": "refund approval threshold",
+      "subject_key": "refunds",
+      "text": "Policy update from finance: as of this week the manager-approval threshold is $250, so anything above $250 needs my OK.",
+      "value": "manager approval required above $250"
+    },
+    "claim_b": {
+      "author": "lucia",
+      "effective_date": null,
+      "kind": "policy",
+      "polarity": "affirm",
+      "room": "support",
+      "scope": "*",
+      "scope_key": "*",
+      "subject": "refund approval threshold",
+      "subject_key": "refunds",
+      "text": "Quick reminder for the desk: customer refunds above $500 are still fine to approve ourselves, no manager sign-off needed.",
+      "value": "refunds above $500 can be approved without manager sign-off"
+    }
+  },
+  "model": "deepseek-ai/DeepSeek-V4.1-Flash-1017",
+  "output": {
+    "confidence": 0.9,
+    "reason": "Finance sets manager approval required above $250 while support says refunds above $500 need no manager sign-off, mutually exclusive thresholds for the same policy.",
+    "relation": "contradiction"
+  },
+  "recorded_at": "2026-11-04T13:43:41+00:00",
+  "task": "classify"
+}

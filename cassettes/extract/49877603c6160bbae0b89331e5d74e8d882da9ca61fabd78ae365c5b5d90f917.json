@@ -1,7 +1,7 @@
 {
   "input": {
     "author": "pablo",
-    "message_id": "sw_5149d55c29546fcbfc28243422859a47",
+    "message_id": "near-misses-2",
     "room": "finance",
     "text": "Correction to my earlier note: the Q4 budget review is Friday, not Thursday."
   },
@@ -20,8 +20,8 @@
         "value": "Friday, not Thursday"
       }
     ],
-    "message_id": "sw_5149d55c29546fcbfc28243422859a47"
+    "message_id": "near-misses-2"
   },
-  "recorded_at": "2026-11-04T12:25:12+00:00",
+  "recorded_at": "2026-11-04T13:43:48+00:00",
   "task": "extract"
 }

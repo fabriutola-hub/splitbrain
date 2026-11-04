@@ -24,6 +24,7 @@ from ..evidence.github import (
     SplitbrainEvidenceError,
     build_evidence,
 )
+from ..evidence.scenario import ScenarioEvidence, load_scenario_evidence
 from ..switch.client import SwitchAgent
 from ..switch.events import (
     ConnectionStateFrame,
@@ -54,6 +55,7 @@ class Verifier:
         agent: SwitchAgent,
         state: bootstrap.BootstrapState,
         evidence_settings: EvidenceSettings,
+        scenario: ScenarioEvidence | None = None,
     ) -> None:
         ops = state.rooms.get(OPS_ROOM)
         if ops is None:
@@ -62,6 +64,7 @@ class Verifier:
         self.state = state
         self.ops_room_id = ops.room_id
         self.evidence_settings = evidence_settings
+        self.scenario = scenario
         self.coverage = RoomCoverage(agent, self.ops_room_id, own_name=AGENT_NAME)
         self.provider: GitHubEvidence | None = None
         self.repo_url: str | None = None
@@ -145,22 +148,27 @@ class Verifier:
         if self.provider is None:
             raise SplitbrainError("Evidence request arrived before the GitHub reference was loaded")
         subject = payload.subject or payload.subject_key
-        try:
-            snapshot: GitHubSnapshot = await self.provider.snapshot(subject)
-            evidence = build_evidence(
-                payload.candidate_id,
-                subject,
-                snapshot,
-                source="fixture" if self.evidence_settings.mode == "fixture" else "github",
+        if self.scenario is not None and (
+            self.scenario.matches(subject) or self.scenario.matches(payload.subject_key)
+        ):
+            evidence = self.scenario.evidence(payload.candidate_id)
+            print(self.scenario.banner(), flush=True)
+            logger.warning(
+                "Scenario fixture used for %s: %s", payload.candidate_id, self.scenario.name
             )
-        except SplitbrainEvidenceError as exc:
-            logger.error("EVIDENCE ERROR for %s: %s", payload.candidate_id, exc)
-            await self.agent.post(
-                self.ops_room_id,
-                f"EVIDENCE ERROR for {payload.candidate_id}: {exc}",
-                thread_id=reply_thread(frame),
-            )
-            raise
+        else:
+            try:
+                evidence = await self._github_evidence(
+                    payload.candidate_id, subject, payload.subject_key
+                )
+            except SplitbrainEvidenceError as exc:
+                logger.error("EVIDENCE ERROR for %s: %s", payload.candidate_id, exc)
+                await self.agent.post(
+                    self.ops_room_id,
+                    f"EVIDENCE ERROR for {payload.candidate_id}: {exc}",
+                    thread_id=reply_thread(frame),
+                )
+                raise
         body = self._body(payload, evidence)
         await self.agent.targeted(
             self.ops_room_id,
@@ -173,12 +181,26 @@ class Verifier:
             "Evidence %s for %s: %s", evidence.status, payload.candidate_id, evidence.summary
         )
 
+    async def _github_evidence(self, candidate_id: str, subject: str, subject_key: str) -> Evidence:
+        if self.provider is None:
+            raise SplitbrainError("Evidence request arrived before the GitHub reference was loaded")
+        terms = [subject, subject_key.replace("-", " ").replace("_", " "), *subject.split()]
+        snapshot: GitHubSnapshot
+        snapshot, matched = await self.provider.snapshot_any(terms)
+        logger.info("Evidence lookup for %r used term %r", subject, matched)
+        return build_evidence(
+            candidate_id,
+            matched,
+            snapshot,
+            source="fixture" if self.evidence_settings.mode == "fixture" else "github",
+        )
+
     @staticmethod
     def _body(request: EvidenceRequestPacket, evidence: Evidence) -> str:
         lines = [
             f"Evidence for {request.candidate_id.upper()} "
             f"({request.subject}, scope {request.scope}):",
-            evidence.summary,
+            evidence.detail or evidence.summary,
             f"Source: {evidence.source}. Status: {evidence.status}.",
         ]
         for item in evidence.items:
@@ -196,17 +218,24 @@ def build_runtime(
     if credentials is None or not state.rooms:
         raise SplitbrainError("Bootstrap is incomplete; run 'uv run splitbrain bootstrap' first.")
     evidence_settings = EvidenceSettings.load(settings.paths)
+    scenario = load_scenario_evidence(settings.paths)
     configure_logging()
     print_service_banner(
         name,
         [
             f"Role: {VERIFIER_ROLE} in {OPS_ROOM} (non-exclusive)",
             f"Evidence mode: {evidence_settings.mode} (SPLITBRAIN_EVIDENCE_MODE)",
+            *([scenario.banner()] if scenario is not None else []),
             "Silent by default: this agent never posts in team rooms.",
         ],
     )
     agent = SwitchAgent(settings.api_base_url, credentials.agent_id, credentials.api_key)
-    processor = Verifier(agent=agent, state=state, evidence_settings=evidence_settings)
+    processor = Verifier(
+        agent=agent,
+        state=state,
+        evidence_settings=evidence_settings,
+        scenario=scenario,
+    )
     return AgentRuntime(agent=agent, processor=processor, name=name, stop=stop)
 
 

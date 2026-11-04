@@ -1,0 +1,27 @@
+{
+  "input": {
+    "author": "page-judging",
+    "message_id": "hackathon-1",
+    "room": "hackathon-judging",
+    "text": "Track 3, Best Core Contribution: the 10 best pull requests on assigned hackathon issues get $100 each."
+  },
+  "model": "deepseek-ai/DeepSeek-V4.1-Flash-1017",
+  "output": {
+    "claims": [
+      {
+        "confidence": 0.9,
+        "effective_date": null,
+        "kind": "policy",
+        "polarity": "affirm",
+        "scope": "Track 3",
+        "scope_key": "*",
+        "subject": "Best Core Contribution prize",
+        "subject_key": "best-core-contribution-prize",
+        "value": "$100 each for the 10 best pull requests on assigned hackathon issues"
+      }
+    ],
+    "message_id": "hackathon-1"
+  },
+  "recorded_at": "2026-11-04T13:43:43+00:00",
+  "task": "extract"
+}

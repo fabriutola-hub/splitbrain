@@ -1,7 +1,7 @@
 {
   "input": {
     "author": "maria",
-    "message_id": "sw_351198597a0279588deaba35ed078e0e",
+    "message_id": "sso-0",
     "room": "sales",
     "text": "Morning! Big one: confirmed with Acme that SSO will be live for them on December 1."
   },
@@ -10,18 +10,18 @@
     "claims": [
       {
         "confidence": 0.95,
-        "effective_date": null,
+        "effective_date": "2026-12-01",
         "kind": "commitment",
         "polarity": "affirm",
         "scope": "Acme",
         "scope_key": "acme",
         "subject": "SSO",
         "subject_key": "sso",
-        "value": "live on December 1"
+        "value": "live on 2026-12-01"
       }
     ],
-    "message_id": "sw_351198597a0279588deaba35ed078e0e"
+    "message_id": "sso-0"
   },
-  "recorded_at": "2026-11-04T12:24:08+00:00",
+  "recorded_at": "2026-11-04T13:43:36+00:00",
   "task": "extract"
 }

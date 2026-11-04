@@ -53,7 +53,7 @@ def test_near_misses_are_five_to_seven_messages_in_distinct_rooms() -> None:
 
 
 def test_unknown_scenario_lists_available_ones() -> None:
-    with pytest.raises(SplitbrainError, match="Available: near-misses, sso"):
+    with pytest.raises(SplitbrainError, match="Available: hackathon, near-misses, refunds, sso"):
         seed.load_scenario(settings(), "does-not-exist")
 
 

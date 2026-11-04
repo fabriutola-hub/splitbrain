@@ -33,6 +33,6 @@
     "reason": "The 99.9% SLA start date and the maintenance-window exclusion are additive terms of the same policy, both can hold.",
     "relation": "compatible"
   },
-  "recorded_at": "2026-11-04T10:09:35+00:00",
+  "recorded_at": "2026-11-04T13:43:26+00:00",
   "task": "classify"
 }

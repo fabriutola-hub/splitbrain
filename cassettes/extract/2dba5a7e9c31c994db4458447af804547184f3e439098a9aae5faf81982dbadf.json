@@ -1,7 +1,7 @@
 {
   "input": {
     "author": "pablo",
-    "message_id": "sw_aff67b0be9f8016765482843e69f1a9e",
+    "message_id": "sso-3",
     "room": "finance",
     "text": "Q4 budget review moved to Thursday."
   },
@@ -11,7 +11,7 @@
       {
         "confidence": 0.85,
         "effective_date": null,
-        "kind": "decision",
+        "kind": "status",
         "polarity": "affirm",
         "scope": "*",
         "scope_key": "*",
@@ -20,8 +20,8 @@
         "value": "moved to Thursday"
       }
     ],
-    "message_id": "sw_aff67b0be9f8016765482843e69f1a9e"
+    "message_id": "sso-3"
   },
-  "recorded_at": "2026-11-04T12:24:16+00:00",
+  "recorded_at": "2026-11-04T13:43:36+00:00",
   "task": "extract"
 }

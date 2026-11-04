@@ -466,3 +466,110 @@ product rule in §3.3 wins). No Sentinel-side exception is needed for ops to be 
   eval pair `n01` were reworded. After all `record` runs, none of the 11 changed
   extraction cassettes holds text from `eval/dataset.jsonl`; the three changed
   classification cassettes differ only in `recorded_at`.
+
+## Verified in M7 (2026-11-04, live `splitbrain` stack, clean wipe)
+
+### Possible upstream bug: race in the EXCLUSIVE role lease
+
+Reproduce with `uv run python scripts/probe_arbiter_lease.py` after
+`uv run splitbrain up && uv run splitbrain bootstrap`, with no Arbiter running:
+
+1. Wait until `get_room_detail(splitbrain-ops).roles[arbiter].held_by == []`
+   (the heartbeat TTL is 6 s after the previous holder stops).
+2. Open one `scope=all&filter=all` SSE stream for `splitbrain-arbiter` and one
+   for `splitbrain-arbiter-b`; call `connect_to_room(splitbrain-ops)` on each.
+3. Fire both `assume_role("arbiter")` calls in the same `asyncio.gather`.
+4. Read `get_room_detail(splitbrain-ops)` (no connection header).
+
+Observed on **two consecutive runs** (probe run twice, 2026-11-04 ~10:10 -04:00):
+
+```
+held_by BEFORE: []
+assume_role('arbiter') splitbrain-arbiter:   HTTP 200 -> {'role': 'arbiter', 'instructions': '# Arbiter\n\nYou hold the exclusive arbiter role in splitbrain-ops. Only one Arbiter acts at a time.\n...'}
+assume_role('arbiter') splitbrain-arbiter-b: HTTP 200 -> {'role': 'arbiter', 'instructions': '# Arbiter\n\nYou hold the exclusive arbiter role ...'}
+held_by AFTER simultaneous assume: ['splitbrain-arbiter-b', 'splitbrain-arbiter']   (run 1)
+held_by AFTER simultaneous assume: ['splitbrain-arbiter', 'splitbrain-arbiter-b']   (run 2)
+RESULT: exclusive lease granted to TWO agents (server race).
+release_role() splitbrain-arbiter-b: HTTP 200 -> {'status': 'released'}
+held_by AFTER loser released: ['splitbrain-arbiter']
+held_by AFTER cleanup: []
+```
+
+So Switch 0.31.0 granted an **exclusive** role to two different agents when both
+`assume_role` calls landed in the same instant. This contradicts the M5
+observation only in timing: when A already holds the lease, B is still refused
+with HTTP 400 `{"detail":"Role 'arbiter' is exclusive and currently held by
+another agent"}` (verified again in M5). The list order in `held_by` is not
+stable, so any client-side tie-break must sort names, not trust the array order.
+`release_role()` takes **no arguments**, needs a connected room, is idempotent,
+and releases only the calling agent's lease (A survived B's release).
+**To report upstream** with the exact steps above.
+
+Consequence seen in the first M7 demo: both Arbiters posted `sb:evidence_request`
+/ `sb:verdict` / `sb:consent_request` and both called `create_room` with the same
+`conflict-sb-5526-sso` name. Switch **allows duplicate room names** (Mattermost
+gets a suffixed channel); `list_all_rooms` then returned two entries with that
+name. The standby's `connect_to_room` on its own room failed with HTTP 400
+`{"detail":"Agent is not a member of this room"}` because `create_room` always
+names `splitbrain-arbiter` + `splitbrain-sentinel`, not the caller's own name.
+
+**Fix kept in Splitbrain (does not hide the server behaviour):**
+`Arbiter._claim_lease()` re-reads `held_by` *after* `assume_role`, keeps only the
+alphabetically first holder, and makes every other holder call `release_role`
+and return to standby; the check is repeated before acting on **every**
+`sb:candidate`. `_open_conflict` looks the room name up with `list_all_rooms`
+first and reuses it instead of creating a second one. `demo` starts `arbiter-b`
+only after `splitbrain-arbiter`'s lease is confirmed (fallback: >= 8 s delay).
+The demo's multi-room read is only a defence with a visible `WARNING`, never a
+substitute for these three guards. Failover still works: when the winner's
+heartbeat lapses, `held_by` contains only the standby and it takes over.
+
+### Other M7 facts
+
+- **`create_room_from_yaml` with `inputs={}` works** for a second, parameter-free
+  version-1 group document. `templates/hackathon.template.yaml` created group
+  `Flip the Switch` with `hackathon-prizes` and `hackathon-judging` (both
+  `channel_public`, users `page-prizes`/`page-judging`/`fabrizio`, agent
+  `splitbrain-sentinel`, one link labelled `same event`). Running bootstrap a
+  second time found both rooms by name and created nothing.
+- **Mattermost `TeammateNameDisplay` is `full_name`** on this stack, so setting
+  `first_name`/`last_name`/`nickname` through `PUT /api/v4/users/{id}/patch`
+  renders "Prizes page" / "Judging page" in the UI. Verified through
+  `GET /api/v4/users/username/{name}` and each user's channel list.
+- **Evidence lookup needs the `subject_key` fallback.** The live model extracts
+  `subject="refund approval threshold"`, `subject_key="refunds"`; a GitHub search
+  for the literal subject finds nothing, so the Verifier now tries the subject,
+  the canonical key and the subject's words (`snapshot_any`). Issue #5 is then
+  found in both `live` and `fixture` mode (`status=conflicting`, so the Arbiter
+  confirms). `sso` still matches on its first term ("SSO").
+- **The hackathon pages are not in the demo repo.** A GitHub lookup honestly
+  returns no issues, which would discard the case. `seed/scenario_evidence.json`
+  is an explicitly labelled, opt-in scenario fixture (paraphrases of the two
+  public pages), enabled by `SPLITBRAIN_SCENARIO_EVIDENCE=hackathon` and
+  announced with a `[DEGRADED]` banner. No GitHub issue was invented; item URLs
+  are `scenario-fixture:` identifiers, not fake web links.
+- **Record/replay from a clean environment**: `uv run splitbrain record`
+  refreshed 94 extraction and 35 classification cassettes (eval: 44 pairs,
+  p=1.000 r=0.889 f1=0.941; `sso`=1, `refunds`=1, `hackathon`=1,
+  `near-misses`=0 candidates). `uv run splitbrain eval --mode replay` produced
+  the same metrics with no network. No seed message is byte-identical to any
+  `eval/dataset.jsonl` line (checked before every record run).
+- **Windows `zoneinfo`** has no system IANA database and no `tzdata`, so
+  `ZoneInfo("America/Caracas")` raised `ZoneInfoNotFoundError`. `tzdata>=2024.1`
+  is now a dependency; `SPLITBRAIN_TZ` then yields `Nov 4 03:19 UTC-04:00`
+  instead of a bare UTC hour. An invalid zone raises at startup.
+- **Fixture banner carries the `[DEGRADED]` prefix** since M7; M6's exact string
+  `EVIDENCE: fixture (recorded GitHub data)` is now
+  `[DEGRADED] EVIDENCE: fixture (recorded GitHub data, no network)`.
+- **Clean-clone reproducibility (acceptance check, verified twice).** After
+  `git clone D:\FlipTheSwitch\splitbrain <temp>` (no `.env.local`, no
+  `deploy/.env`, no `SPLITBRAIN_*` variables, no `.venv`) and
+  `splitbrain down --wipe` in the original, `uv run splitbrain demo --auto-decide`
+  in the clone reached `Corrections posted` and printed the summary with exit
+  code 0: `[DEGRADED] LLM replay (no SPLITBRAIN_LLM_API_KEY)` plus live GitHub
+  evidence. Repeating with `--offline` also exited 0, with both
+  `[DEGRADED] LLM replay` and `[DEGRADED] EVIDENCE: fixture` at startup and in
+  the final summary. `uv run` created the clone's `.venv` and installed the 28
+  locked packages (including `tzdata`) without any manual step. Conflict ids
+  differed between runs (`sb-0471`, `sb-2046`) because Switch message ids are
+  fresh after each wipe; the loop was identical.

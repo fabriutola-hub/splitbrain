@@ -1,0 +1,38 @@
+{
+  "input": {
+    "claim_a": {
+      "author": "dana",
+      "effective_date": null,
+      "kind": "commitment",
+      "polarity": "affirm",
+      "room": "ops",
+      "scope": "*",
+      "scope_key": "*",
+      "subject": "uptime SLA",
+      "subject_key": "uptime-sla",
+      "text": "Ops can only commit to 99.5% uptime for all customers in January.",
+      "value": "99.5% uptime in January"
+    },
+    "claim_b": {
+      "author": "maria",
+      "effective_date": null,
+      "kind": "commitment",
+      "polarity": "affirm",
+      "room": "sales",
+      "scope": "Acme",
+      "scope_key": "acme",
+      "subject": "uptime SLA",
+      "subject_key": "uptime-sla",
+      "text": "We signed Acme at a 99.9% uptime SLA starting in January, that is contractual.",
+      "value": "99.9% uptime starting in January"
+    }
+  },
+  "model": "deepseek-ai/DeepSeek-V4.1-Flash-1017",
+  "output": {
+    "confidence": 0.9,
+    "reason": "Ops states a general 99.5% commitment for all customers while sales cites a specific contractual 99.9% SLA for Acme, so the scopes differ.",
+    "relation": "unrelated"
+  },
+  "recorded_at": "2026-11-04T13:41:50+00:00",
+  "task": "classify"
+}

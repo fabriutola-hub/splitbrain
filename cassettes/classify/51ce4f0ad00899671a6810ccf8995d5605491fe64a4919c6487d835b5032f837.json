@@ -33,6 +33,6 @@
     "reason": "Product states the enterprise trial is 14 days while sales asserts it is 30 days for the same enterprise tier.",
     "relation": "contradiction"
   },
-  "recorded_at": "2026-11-04T10:08:08+00:00",
+  "recorded_at": "2026-11-04T13:41:53+00:00",
   "task": "classify"
 }

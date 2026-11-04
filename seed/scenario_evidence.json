@@ -1,0 +1,37 @@
+{
+  "note": "Scenario-owned evidence fixture, NOT GitHub data. The two entries are paraphrases of the two public Flip the Switch hackathon announcement pages (Prizes and Judging), recorded by hand for the offline demo. The demo roadmap repo has no issue about them, so the Verifier would honestly answer 'no evidence' and the Arbiter would discard the case. This fixture is enabled ONLY when SPLITBRAIN_SCENARIO_EVIDENCE names the scenario (splitbrain demo --scenario hackathon does it), and every use prints a [DEGRADED] banner. The item URLs are deliberately scenario-fixture: identifiers, not invented web links. Nothing here is presented as independent third-party verification: the evidence IS the two contradictory public pages.",
+  "scenarios": {
+    "hackathon": {
+      "label": "Flip the Switch public pages (scenario fixture, paraphrases)",
+      "keywords": [
+        "track 3",
+        "best core contribution",
+        "hackathon",
+        "prize",
+        "judging",
+        "pull request",
+        "core contribution"
+      ],
+      "summary": "The Prizes page says $100 each for up to 20 merged pull requests on assigned hackathon issues; the Judging page says the 10 best pull requests get $100 each.",
+      "detail": "Two public pages of the same event disagree: prizes page (paraphrase) 'Track 3, Best Core Contribution: $100 each for up to 20 merged pull requests on assigned hackathon issues.'; judging page (paraphrase) 'Track 3, Best Core Contribution: the 10 best pull requests on assigned hackathon issues get $100 each.'. This is a recorded scenario fixture of the announcements themselves, not a GitHub issue and not an independent audit. Source file: seed/scenario_evidence.json.",
+      "items": [
+        {
+          "title": "Prizes page, Track 3 Best Core Contribution (public announcement, paraphrase)",
+          "url": "scenario-fixture:hackathon-prizes",
+          "state": "public announcement",
+          "milestone": "",
+          "labels": ["scenario-fixture"],
+          "updated_at": "2026-11-04"
+        },
+        {
+          "title": "Judging page, Track 3 Best Core Contribution (public announcement, paraphrase)",
+          "url": "scenario-fixture:hackathon-judging",
+          "state": "public announcement",
+          "milestone": "",
+          "labels": ["scenario-fixture"],
+          "updated_at": "2026-11-04"
+        }
+      ]
+    }
+  }
+}

@@ -1,0 +1,27 @@
+# Closing beat of the video, version-1 group document (SPEC 4.1 / 4.10).
+# Bootstrap runs this once, after the Acme group; it is idempotent: on later
+# runs the two rooms are found by name and nothing is created.
+# The two "page" users stand for the two PUBLIC announcement pages of the
+# Flip the Switch hackathon. fabrizio is in both rooms as the event organiser.
+version: 1
+
+group:
+  name: Flip the Switch
+  description: Public hackathon pages whose prize announcements disagree
+  color: "#0F766E"
+
+rooms:
+  - name: hackathon-prizes
+    description: Public Prizes page. Track 3 award announcements live here.
+    channel_type: channel_public
+    users: [page-prizes, fabrizio]
+    agents: [splitbrain-sentinel]
+
+  - name: hackathon-judging
+    description: Public Judging page. Track 3 criteria announcements live here.
+    channel_type: channel_public
+    users: [page-judging, fabrizio]
+    agents: [splitbrain-sentinel]
+
+links:
+  - {from: hackathon-prizes, to: hackathon-judging, label: same event}

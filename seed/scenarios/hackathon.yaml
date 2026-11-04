@@ -1,0 +1,15 @@
+name: hackathon
+people:
+  page-prizes: "Prizes page"
+  page-judging: "Judging page"
+  fabrizio: "Fabrizio U."
+# Closing beat of the video: two PUBLIC announcement pages of the same event
+# disagree about Track 3, Best Core Contribution. These are paraphrases of the
+# real pages, not eval lines. No decision block: the demo only needs the
+# conflict room with both quotes. The evidence is an explicitly labelled
+# scenario fixture (seed/scenario_evidence.json, enabled by
+# SPLITBRAIN_SCENARIO_EVIDENCE=hackathon); the GitHub demo repo has no issue
+# about the prizes, so we do not invent one.
+messages:
+  - {room: hackathon-prizes, as: page-prizes, after_s: 0, text: "Track 3, Best Core Contribution: $100 each for up to 20 merged pull requests on assigned hackathon issues."}
+  - {room: hackathon-judging, as: page-judging, after_s: 3, text: "Track 3, Best Core Contribution: the 10 best pull requests on assigned hackathon issues get $100 each."}

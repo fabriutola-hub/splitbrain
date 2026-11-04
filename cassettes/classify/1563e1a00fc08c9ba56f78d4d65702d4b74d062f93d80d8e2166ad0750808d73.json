@@ -1,0 +1,38 @@
+{
+  "input": {
+    "claim_a": {
+      "author": "tomas",
+      "effective_date": null,
+      "kind": "commitment",
+      "polarity": "affirm",
+      "room": "engineering",
+      "scope": "*",
+      "scope_key": "*",
+      "subject": "SSO",
+      "subject_key": "sso",
+      "text": "SSO is scheduled for the Q4 release, the migration lands in November.",
+      "value": "scheduled for Q4 release"
+    },
+    "claim_b": {
+      "author": "dana",
+      "effective_date": null,
+      "kind": "decision",
+      "polarity": "affirm",
+      "room": "leadership",
+      "scope": "*",
+      "scope_key": "*",
+      "subject": "SSO",
+      "subject_key": "sso",
+      "text": "As of today engineering replaced that plan: SSO is now scheduled for Q1 and the Q4 date is superseded.",
+      "value": "rescheduled to Q1, Q4 date superseded"
+    }
+  },
+  "model": "deepseek-ai/DeepSeek-V4.1-Flash-1017",
+  "output": {
+    "confidence": 0.95,
+    "reason": "The leadership message explicitly states the Q4 plan was replaced and superseded by a Q1 schedule.",
+    "relation": "update"
+  },
+  "recorded_at": "2026-11-04T13:43:08+00:00",
+  "task": "classify"
+}

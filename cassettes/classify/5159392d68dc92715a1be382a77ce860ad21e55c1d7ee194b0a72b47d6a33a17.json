@@ -33,6 +33,6 @@
     "reason": "Engineering caps the public API at 100 rpm on December 1 while product says it rises to 1000 rpm the same day, mutually exclusive limits.",
     "relation": "contradiction"
   },
-  "recorded_at": "2026-11-04T10:07:58+00:00",
+  "recorded_at": "2026-11-04T13:41:44+00:00",
   "task": "classify"
 }

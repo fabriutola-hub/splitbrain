@@ -11,6 +11,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -29,7 +30,7 @@ logger = logging.getLogger(__name__)
 API_ROOT = "https://api.github.com"
 EVIDENCE_MODES = ("live", "fixture")
 FIXTURE_RELATIVE_PATH = Path("seed") / "github_fixture.json"
-FIXTURE_BANNER = "EVIDENCE: fixture (recorded GitHub data)"
+FIXTURE_BANNER = "[DEGRADED] EVIDENCE: fixture (recorded GitHub data, no network)"
 
 
 class SplitbrainEvidenceError(SplitbrainError):
@@ -285,6 +286,32 @@ class GitHubEvidence:
             return self._fixture_snapshot(subject)
         return await self._live_snapshot(subject)
 
+    async def snapshot_any(self, terms: Sequence[str]) -> tuple[GitHubSnapshot, str]:
+        """Try the extracted subject, then its canonical key and its words.
+
+        A model may return a descriptive subject ("refund approval threshold")
+        that is not a literal phrase in any issue; its subject_key ("refunds")
+        is the searchable term. The first term with issues wins, and the matched
+        term is returned so the evidence text names what was really searched.
+        """
+        words = [term for term in terms if term and term.strip()]
+        if not words:
+            raise SplitbrainEvidenceError("No evidence search term was supplied")
+        tried: set[str] = set()
+        last: GitHubSnapshot | None = None
+        matched = words[0]
+        for term in words:
+            key = term.strip().casefold()
+            if key in tried:
+                continue
+            tried.add(key)
+            last = await self.snapshot(term)
+            matched = term
+            if last.issues:
+                break
+        assert last is not None
+        return last, matched
+
     async def capture(self, destination: Path | None = None) -> GitHubSnapshot:
         """Record every open issue plus its milestone timeline from the live repo."""
         if self.settings.mode != "live":
@@ -321,28 +348,34 @@ def build_evidence(
         )
         for issue in open_issues
     ]
+    slug = repo_slug(snapshot.repo)
+    tail = f"{len(open_issues)} open issue(s) matched; closed duplicates ignored."
     moves = [(issue, move) for issue in open_issues if (move := milestone_move(issue))]
     if moves:
         issue, (before, after, day) = moves[0]
-        lead = (
-            f'GitHub, {repo_slug(snapshot.repo)}: issue #{issue.number} "{issue.title}" '
-            f"moved from {before} to {after} on {day} (timeline: {timeline_text(issue)})."
-        )
+        # The brief shows only this one sentence; the timeline is for the record.
+        summary = f'issue #{issue.number} "{issue.title}" moved from {before} to {after} on {day}.'
+        detail = f"GitHub, {slug}: {summary} Timeline: {timeline_text(issue)}. {tail}"
         status = "supports_b"
     elif open_issues:
-        lead = (
-            f"GitHub, {repo_slug(snapshot.repo)}: {len(open_issues)} open issue(s) mention "
-            f'"{subject}" but none of them changed milestone.'
+        issue = open_issues[0]
+        milestone = f", milestone {issue.milestone}" if issue.milestone else ""
+        summary = f'issue #{issue.number} "{issue.title}" is open{milestone}.'
+        detail = (
+            f"GitHub, {slug}: {summary} "
+            f'It is the closest open issue for "{subject}"; no milestone move was recorded. '
+            f"{tail}"
         )
         status = "conflicting"
     else:
-        lead = f'GitHub, {repo_slug(snapshot.repo)}: no open issue mentions "{subject}".'
+        summary = f'no open issue mentions "{subject}".'
+        detail = f"GitHub, {slug}: {summary} {tail}"
         status = "none"
-    summary = f"{lead} {len(open_issues)} open issue(s) matched; closed duplicates ignored."
     return Evidence(
         candidate_id=candidate_id,
         source=source,
         status=status,
         items=items,
         summary=summary,
+        detail=detail,
     )

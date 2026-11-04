@@ -7,17 +7,11 @@ import asyncio
 import sys
 from collections.abc import Sequence
 
-from . import bootstrap, evaluation, seed, stack
+from . import bootstrap, demo, evaluation, recording, seed, stack
 from .agents import arbiter as arbiter_agent
 from .agents import sentinel as sentinel_agent
 from .agents import verifier as verifier_agent
 from .config import Settings, SplitbrainError
-
-# Commands that belong to later milestones; they must exist in --help now.
-_STUB_MILESTONES: dict[str, str] = {
-    "demo": "M7",
-    "record": "M7",
-}
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -33,19 +27,34 @@ def build_parser() -> argparse.ArgumentParser:
     commands.add_parser("status", help="show stack health, agents, rooms and the group")
     commands.add_parser("bootstrap", help="register agents, people and rooms (idempotent)")
 
-    run = commands.add_parser("run", help="run one agent in the foreground (M4)")
+    run = commands.add_parser("run", help="run one agent in the foreground")
     run.add_argument("agent", choices=["sentinel", "arbiter", "verifier", "arbiter-b", "all"])
     run.add_argument("--tui", action="store_true", help="rich live view (Sentinel)")
 
-    seed = commands.add_parser("seed", help="post a demo scenario (M4)")
-    seed.add_argument("scenario", help="scenario name")
-    seed.add_argument("--auto-decide", action="store_true", help="also post the decision")
+    seed_parser = commands.add_parser("seed", help="post a demo scenario")
+    seed_parser.add_argument("scenario", help="scenario name")
+    seed_parser.add_argument("--auto-decide", action="store_true", help="also post the decision")
 
-    demo = commands.add_parser("demo", help="up + bootstrap + run all + seed (M7)")
-    demo.add_argument("--scenario", default="sso", help="scenario name (default: sso)")
-    demo.add_argument("--auto-decide", action="store_true", help="also post the decision")
+    demo_parser = commands.add_parser("demo", help="clean up + bootstrap + agents + seed")
+    demo_parser.add_argument(
+        "--scenario",
+        default="sso",
+        choices=("sso", "refunds", "hackathon"),
+        help="scenario name (default: sso)",
+    )
+    demo_parser.add_argument("--auto-decide", action="store_true", help="close the loop alone")
+    demo_parser.add_argument(
+        "--offline",
+        action="store_true",
+        help="force replay cassettes and fixture evidence (no LLM, no GitHub network)",
+    )
+    demo_parser.add_argument(
+        "--keep",
+        action="store_true",
+        help="reuse the running stack; still reset .splitbrain/sentinel.db",
+    )
 
-    commands.add_parser("record", help="refresh the LLM cassettes (M7)")
+    commands.add_parser("record", help="refresh eval + scenario cassettes in record mode")
     eval_parser = commands.add_parser("eval", help="run the labeled eval dataset (M3)")
     eval_parser.add_argument(
         "--mode",
@@ -57,13 +66,20 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 async def _dispatch(args: argparse.Namespace) -> int:
-    milestone = _STUB_MILESTONES.get(args.command)
-    if milestone:
-        raise NotImplementedError(milestone)
-
-    # M3 is Switch-free: eval must work on a clean clone without deploy/.env.
+    # These two are Switch-free: they must work on a clean clone with no .env.
     if args.command == "eval":
         await evaluation.run(args.mode)
+        return 0
+    if args.command == "record":
+        await recording.record_all()
+        return 0
+    if args.command == "demo":
+        await demo.run(
+            scenario=args.scenario,
+            auto_decide=args.auto_decide,
+            offline=args.offline,
+            keep=args.keep,
+        )
         return 0
 
     settings = Settings.load(require_env_file=args.command != "up")
@@ -86,10 +102,7 @@ async def _dispatch(args: argparse.Namespace) -> int:
         elif args.agent == "verifier":
             await verifier_agent.run_forever(settings)
         else:
-            raise SplitbrainError(
-                "'run all' arrives in M7 with the one-command demo; start the agents in "
-                "separate terminals for now (sentinel, arbiter, arbiter-b, verifier)."
-            )
+            await demo.run_agents(settings)
     elif args.command == "seed":
         await seed.run(settings, args.scenario, auto_decide=args.auto_decide)
     else:

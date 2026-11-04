@@ -1,15 +1,15 @@
 {
   "input": {
     "author": "lucia",
-    "message_id": "sw_08acd791c0c5e53fe5ff1b0d55cbc1f8",
+    "message_id": "near-misses-5",
     "room": "support",
     "text": "Are we still shipping the admin console beta to Acme in December?"
   },
   "model": "deepseek-ai/DeepSeek-V4.1-Flash-1017",
   "output": {
     "claims": [],
-    "message_id": "sw_08acd791c0c5e53fe5ff1b0d55cbc1f8"
+    "message_id": "near-misses-5"
   },
-  "recorded_at": "2026-11-04T12:25:21+00:00",
+  "recorded_at": "2026-11-04T13:43:48+00:00",
   "task": "extract"
 }

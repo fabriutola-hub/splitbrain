@@ -33,6 +33,6 @@
     "reason": "The net 30 policy applies to all new contracts while the net 60 commitment is specific to Acme's renewal, so they cover different scopes.",
     "relation": "unrelated"
   },
-  "recorded_at": "2026-11-04T10:08:22+00:00",
+  "recorded_at": "2026-11-04T13:42:06+00:00",
   "task": "classify"
 }

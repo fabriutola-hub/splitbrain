@@ -1,0 +1,27 @@
+{
+  "input": {
+    "author": "maria",
+    "message_id": "refunds-1",
+    "room": "sales",
+    "text": "The help centre article about password resets is scheduled for Thursday."
+  },
+  "model": "deepseek-ai/DeepSeek-V4.1-Flash-1017",
+  "output": {
+    "claims": [
+      {
+        "confidence": 0.85,
+        "effective_date": null,
+        "kind": "commitment",
+        "polarity": "affirm",
+        "scope": "*",
+        "scope_key": "*",
+        "subject": "password reset help centre article",
+        "subject_key": "password-reset-docs",
+        "value": "scheduled for Thursday"
+      }
+    ],
+    "message_id": "refunds-1"
+  },
+  "recorded_at": "2026-11-04T13:43:39+00:00",
+  "task": "extract"
+}

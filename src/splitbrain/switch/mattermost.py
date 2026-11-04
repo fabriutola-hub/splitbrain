@@ -221,8 +221,22 @@ class MattermostAdmin:
             self._team_id = str(response.json()["id"])
         return self._team_id
 
-    async def ensure_user(self, username: str, password: str) -> MattermostUser:
+    async def _set_display_name(self, user_id: str, display_name: str) -> None:
+        first, _, last = display_name.partition(" ")
+        response = await self._client.put(
+            f"{self.base_url}{API}/users/{user_id}/patch",
+            json={"nickname": display_name, "first_name": first, "last_name": last},
+        )
+        if response.status_code not in (200, 201, 204):
+            raise MattermostError(
+                "users/patch", response.status_code, redact(response.text, (display_name,))
+            )
+
+    async def ensure_user(
+        self, username: str, password: str, *, display_name: str | None = None
+    ) -> MattermostUser:
         """Create the person if needed, put them in the team, then log in as them."""
+        first, _, last = (display_name or "Integration Probe").partition(" ")
         lookup = await self._client.get(f"{self.base_url}{API}/users/username/{username}")
         if lookup.status_code == 200:
             user = UserRecord.model_validate(lookup.json())
@@ -233,8 +247,9 @@ class MattermostAdmin:
                     "username": username,
                     "email": f"{username}@example.test",
                     "password": password,
-                    "first_name": "Integration",
-                    "last_name": "Probe",
+                    "first_name": first,
+                    "last_name": last,
+                    "nickname": display_name or "",
                 },
             )
             if created.status_code not in (200, 201):
@@ -259,6 +274,8 @@ class MattermostAdmin:
             raise MattermostError(
                 "teams/members", member.status_code, redact(member.text, (password,))
             )
+        if display_name:
+            await self._set_display_name(user.id, display_name)
         try:
             return await MattermostUser.login(self.base_url, username, password, self.team_name)
         except MattermostError as exc:

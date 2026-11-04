@@ -26,15 +26,38 @@ AGENT_NAMES = (
     "splitbrain-verifier",
     "splitbrain-arbiter-b",
 )
-DEMO_USERS = ("maria", "tomas", "lucia", "pablo", "fabrizio")
+DEMO_USERS = (
+    "maria",
+    "tomas",
+    "lucia",
+    "pablo",
+    "fabrizio",
+    "page-prizes",
+    "page-judging",
+)
+# Mattermost renders full_name by default in this stack; make the two public
+# pages readable in the UI instead of "Integration Probe".
+DEMO_USER_DISPLAY_NAMES = {
+    "maria": "María Gómez",
+    "tomas": "Tomás Rivera",
+    "lucia": "Lucía Pérez",
+    "pablo": "Pablo Ruiz",
+    "fabrizio": "Fabrizio U.",
+    "page-prizes": "Prizes page",
+    "page-judging": "Judging page",
+}
 TEAM_ROOMS = ("sales", "engineering", "support", "finance")
 OPS_ROOM = "splitbrain-ops"
 ALL_ROOMS = (*TEAM_ROOMS, OPS_ROOM)
+HACKATHON_ROOMS = ("hackathon-prizes", "hackathon-judging")
+HACKATHON_GROUP = "Flip the Switch"
+STATE_ROOMS = (*ALL_ROOMS, *HACKATHON_ROOMS)
 GROUP_NAME = "Acme"
 REFERENCE_NAME = "Acme roadmap"
 DEFAULT_ROADMAP_REPO = "https://github.com/fabriutola-hub/splitbrain-demo-roadmap"
 STATE_FILE = "state.json"
 TEMPLATE_FILE = "splitbrain.template.yaml"
+HACKATHON_TEMPLATE_FILE = "hackathon.template.yaml"
 
 
 class AgentState(BaseModel):
@@ -103,8 +126,8 @@ def save_state(settings: Settings, state: BootstrapState) -> None:
         path.chmod(0o600)
 
 
-def template_text(settings: Settings) -> str:
-    path = settings.paths.root / "templates" / TEMPLATE_FILE
+def template_text(settings: Settings, filename: str = TEMPLATE_FILE) -> str:
+    path = settings.paths.root / "templates" / filename
     if not path.is_file():
         raise SplitbrainError(f"Missing template: {path}")
     return path.read_text(encoding="utf-8")
@@ -191,7 +214,11 @@ async def ensure_people(
         # leave accounts whose credential was never written down.
         save_state(settings, state)
     for username in DEMO_USERS:
-        user = await admin.ensure_user(username, state.mattermost.password)
+        user = await admin.ensure_user(
+            username,
+            state.mattermost.password,
+            display_name=DEMO_USER_DISPLAY_NAMES.get(username),
+        )
         await user.aclose()
         if username not in state.mattermost.users:
             state.mattermost.users.append(username)
@@ -308,6 +335,57 @@ async def ensure_rooms(agent: OperationClient, settings: Settings, state: Bootst
     await _ensure_ops_members_and_links(agent, state)
 
 
+async def ensure_hackathon_rooms(
+    agent: OperationClient, settings: Settings, state: BootstrapState
+) -> None:
+    """M7: the two public pages, created by their own template, idempotently."""
+    existing = await _all_rooms(agent)
+    found = {name: existing[name] for name in HACKATHON_ROOMS if name in existing}
+    if found and len(found) != len(HACKATHON_ROOMS):
+        raise SplitbrainError(
+            f"Partial hackathon group found ({sorted(found)}); "
+            f"missing {sorted(set(HACKATHON_ROOMS) - set(found))}. "
+            "Refusing to provision again to avoid duplicate rooms."
+        )
+    if found:
+        for name, room_id in found.items():
+            detail = await agent.op("get_room_detail", room_id=room_id)
+            state.rooms[name] = RoomState(
+                room_id=room_id,
+                channel_type=str(detail.get("channel_type") or "channel_public"),
+                group_name=detail.get("group_name") or HACKATHON_GROUP,
+            )
+        return
+
+    text = template_text(settings, HACKATHON_TEMPLATE_FILE)
+    document = yaml.safe_load(text)
+    channel_types = {
+        str(room["name"]): str(room.get("channel_type", "channel_public"))
+        for room in document["rooms"]
+    }
+    result = await agent.op("create_room_from_yaml", yaml=text, inputs={})
+    errors = result.get("errors") or []
+    if errors:
+        raise SplitbrainError(f"Hackathon template reported errors: {errors}")
+    for room in result.get("rooms", []):
+        failures = room.get("failed_attachments") or []
+        if failures:
+            raise SplitbrainError(
+                f"Room {room.get('room_name')} has failed attachments: {failures}"
+            )
+        name = str(room["room_name"])
+        if name not in HACKATHON_ROOMS:
+            raise SplitbrainError(f"Hackathon template created unexpected room {name!r}")
+        state.rooms[name] = RoomState(
+            room_id=str(room["room_id"]),
+            channel_type=channel_types[name],
+            group_name=str(result.get("group_name") or HACKATHON_GROUP),
+        )
+    missing = sorted(set(HACKATHON_ROOMS) - set(state.rooms))
+    if missing:
+        raise SplitbrainError(f"Hackathon template did not create the expected rooms: {missing}")
+
+
 async def ensure_reference(
     agent: OperationClient, settings: Settings, state: BootstrapState
 ) -> None:
@@ -346,15 +424,16 @@ def print_summary(state: BootstrapState) -> None:
     print(f"Bootstrap complete. Group: {state.group or GROUP_NAME}")
     print(f"Agents: {', '.join(sorted(state.agents))}")
     print("Rooms:")
-    for name in ALL_ROOMS:
-        room = state.rooms[name]
-        print(f"  {name:<16} {room.channel_type:<18} {room.room_id}")
+    for name in STATE_ROOMS:
+        room = state.rooms.get(name)
+        if room is not None:
+            print(f"  {name:<20} {room.channel_type:<18} {room.room_id}")
     if state.reference:
         print(f"Reference: {state.reference.name} attached to {OPS_ROOM}")
     if state.mattermost:
         print("Mattermost demo logins (team switch, shared password):")
         for username in DEMO_USERS:
-            print(f"  {username:<10} {state.mattermost.password}")
+            print(f"  {username:<14} {state.mattermost.password}")
 
 
 async def run(settings: Settings) -> BootstrapState:
@@ -402,6 +481,8 @@ async def run(settings: Settings) -> BootstrapState:
             await asyncio.wait_for(state_ready.wait(), timeout=20.0)
             await ensure_rooms(agent, settings, state)
             save_state(settings, state)
+            await ensure_hackathon_rooms(agent, settings, state)
+            save_state(settings, state)
             await ensure_reference(agent, settings, state)
             save_state(settings, state)
         finally:
@@ -423,10 +504,10 @@ async def print_status(settings: Settings) -> None:
     print(f"group: {state.group or GROUP_NAME}")
     print(f"agents: {', '.join(sorted(state.agents))}")
     print("rooms:")
-    for name in ALL_ROOMS:
+    for name in STATE_ROOMS:
         room = state.rooms.get(name)
         if room is not None:
-            print(f"  {name:<16} {room.channel_type:<18} {room.room_id}")
+            print(f"  {name:<20} {room.channel_type:<18} {room.room_id}")
     print(f"reference: {state.reference.name if state.reference else 'none'}")
     ops = state.rooms.get(OPS_ROOM)
     sentinel = state.agents.get("splitbrain-sentinel")

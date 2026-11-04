@@ -17,11 +17,11 @@
         "scope_key": "acme",
         "subject": "uptime SLA",
         "subject_key": "uptime-sla",
-        "value": "99.9% uptime starting January"
+        "value": "99.9% uptime starting in January"
       }
     ],
     "message_id": "c05-a"
   },
-  "recorded_at": "2026-11-04T10:08:03+00:00",
+  "recorded_at": "2026-11-04T13:41:49+00:00",
   "task": "extract"
 }

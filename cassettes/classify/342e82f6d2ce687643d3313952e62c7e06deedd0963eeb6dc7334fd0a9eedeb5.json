@@ -29,10 +29,10 @@
   },
   "model": "deepseek-ai/DeepSeek-V4.1-Flash-1017",
   "output": {
-    "confidence": 0.8,
-    "reason": "A 14-day base trial and an optional 7-day extension on request can both be true at once.",
+    "confidence": 0.88,
+    "reason": "A 14-day base trial and an optional 7-day extension on request are additive and can both hold.",
     "relation": "compatible"
   },
-  "recorded_at": "2026-11-04T10:09:33+00:00",
+  "recorded_at": "2026-11-04T13:43:23+00:00",
   "task": "classify"
 }

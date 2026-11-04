@@ -30,9 +30,9 @@
   "model": "deepseek-ai/DeepSeek-V4.1-Flash-1017",
   "output": {
     "confidence": 0.88,
-    "reason": "The 99.9% applies to January while the 99.95% raise starts in Q3, so both can hold in different time windows.",
+    "reason": "The 99.9% figure applies to January while the 99.95% raise starts in Q3, so both can hold in different time windows.",
     "relation": "compatible"
   },
-  "recorded_at": "2026-11-04T10:09:11+00:00",
+  "recorded_at": "2026-11-04T13:42:59+00:00",
   "task": "classify"
 }

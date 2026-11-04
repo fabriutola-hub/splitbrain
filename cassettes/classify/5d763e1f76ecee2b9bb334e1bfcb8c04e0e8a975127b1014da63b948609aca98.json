@@ -30,9 +30,9 @@
   "model": "deepseek-ai/DeepSeek-V4.1-Flash-1017",
   "output": {
     "confidence": 0.9,
-    "reason": "Product says the enterprise plan includes 25 seats while sales says the order form includes 50, mutually exclusive seat counts for the same tier.",
+    "reason": "Product says the enterprise plan includes 25 seats while sales says 50 seats for the same enterprise tier, which cannot both be true.",
     "relation": "contradiction"
   },
-  "recorded_at": "2026-11-04T10:08:40+00:00",
+  "recorded_at": "2026-11-04T13:42:22+00:00",
   "task": "classify"
 }

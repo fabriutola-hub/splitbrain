@@ -21,17 +21,45 @@ def test_help_lists_every_command(capsys: pytest.CaptureFixture[str]) -> None:
         assert command in output
 
 
-@pytest.mark.parametrize(
-    ("argv", "milestone"),
-    [
-        (["demo"], "M7"),
-        (["record"], "M7"),
-    ],
-)
-def test_stubs_raise_not_implemented(argv: list[str], milestone: str) -> None:
-    with pytest.raises(NotImplementedError) as error:
-        cli.main(argv)
-    assert str(error.value) == milestone
+def test_demo_dispatch_does_not_load_switch_settings(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[dict[str, object]] = []
+
+    async def fake_run(**kwargs: object) -> None:
+        calls.append(kwargs)
+
+    monkeypatch.setattr(cli.demo, "run", fake_run)
+    monkeypatch.setattr(
+        cli.Settings,
+        "load",
+        classmethod(lambda cls, **kwargs: (_ for _ in ()).throw(AssertionError("no Switch here"))),
+    )
+    assert cli.main(["demo", "--scenario", "refunds", "--auto-decide", "--offline", "--keep"]) == 0
+    assert calls == [
+        {
+            "scenario": "refunds",
+            "auto_decide": True,
+            "offline": True,
+            "keep": True,
+        }
+    ]
+
+
+def test_record_dispatch(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: list[bool] = []
+
+    async def fake_record() -> None:
+        calls.append(True)
+
+    monkeypatch.setattr(cli.recording, "record_all", fake_record)
+    monkeypatch.setattr(
+        cli.Settings,
+        "load",
+        classmethod(lambda cls, **kwargs: (_ for _ in ()).throw(AssertionError("no Switch here"))),
+    )
+    assert cli.main(["record"]) == 0
+    assert calls == [True]
 
 
 def test_run_sentinel_dispatch(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -71,12 +99,16 @@ def test_run_of_a_m5_agent_dispatches(
     assert calls == [("settings-object", expected_kwargs)]
 
 
-def test_run_all_is_still_an_m7_stub(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
-) -> None:
+def test_run_all_dispatches_to_the_agent_group(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: list[object] = []
+
+    async def fake_run_agents(settings: object) -> None:
+        calls.append(settings)
+
+    monkeypatch.setattr(cli.demo, "run_agents", fake_run_agents)
     monkeypatch.setattr(cli.Settings, "load", classmethod(lambda cls, **kwargs: "settings-object"))
-    assert cli.main(["run", "all"]) == 1
-    assert "M7" in capsys.readouterr().err
+    assert cli.main(["run", "all"]) == 0
+    assert calls == ["settings-object"]
 
 
 def test_keyboard_interrupt_exits_gracefully(

@@ -19,10 +19,12 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from . import bootstrap
 from .config import Settings, SplitbrainError
+from .core.store import ClaimStore
 from .switch.client import SwitchAgent
 from .switch.mattermost import MattermostError, MattermostUser, Post
 
 SCENARIO_DIR = Path("seed") / "scenarios"
+ALL_SCENARIOS: tuple[str, ...] = ("sso", "refunds", "hackathon", "near-misses")
 CHANNEL_TIMEOUT_S = 10.0
 CONSENT_QUESTION_TIMEOUT_S = 120.0
 CONFLICT_ROOM_TIMEOUT_S = 180.0
@@ -104,6 +106,64 @@ def load_scenario(settings: Settings, name: str) -> Scenario:
     if unknown:
         raise SplitbrainError(f"{path} uses people missing from 'people': {', '.join(unknown)}")
     return scenario
+
+
+def synthetic_state() -> bootstrap.BootstrapState:
+    """Room map for the offline pipeline (record / replay tests), no Switch."""
+    return bootstrap.BootstrapState(
+        rooms={
+            name: bootstrap.RoomState(
+                room_id=f"r-{name}",
+                channel_type="channel_private"
+                if name in ("engineering", "splitbrain-ops")
+                else "channel_public",
+            )
+            for name in bootstrap.STATE_ROOMS
+        }
+    )
+
+
+async def check_stale_claims(settings: Settings, scenario: Scenario) -> None:
+    """Refuse a re-seed when an earlier run left active claims in these rooms.
+
+    M6 showed the failure mode: an old active claim pairs with the new message
+    and produces a second candidate whose correction lands in the old thread.
+    """
+    from .agents import sentinel as sentinel_agent  # local: DB_FILENAME is patchable
+
+    state_dir = getattr(settings.paths, "state_dir", None)
+    if state_dir is None:
+        return
+    db_path = Path(state_dir) / sentinel_agent.DB_FILENAME
+    if not db_path.is_file():
+        return
+    store = ClaimStore(db_path)
+    try:
+        active = await store.active_claims()
+    finally:
+        await store.close()
+    rooms = {message.room for message in scenario.messages}
+    people = set(scenario.people)
+    stale = [
+        claim
+        for claim in active
+        if claim.room_name in rooms
+        and claim.author in people
+        and not claim.room_name.startswith("conflict-")
+    ]
+    if not stale:
+        return
+    sample = ", ".join(
+        f"#{claim.room_name}/{claim.author}: {claim.subject_key}" for claim in stale[:4]
+    )
+    raise SplitbrainError(
+        f"Sentinel still holds {len(stale)} active claim(s) from an earlier run of "
+        f"scenario {scenario.name!r} ({sample}). Re-seeding would pair them with the new "
+        "messages and create a second, stale conflict. Clean up first:\n"
+        "  uv run splitbrain demo                  # wipes the stack and starts clean\n"
+        "  uv run splitbrain down --wipe && uv run splitbrain up && uv run splitbrain bootstrap\n"
+        "or delete just .splitbrain/sentinel.db (then restart the Sentinel)."
+    )
 
 
 async def _channel(user: MattermostUser, room: str) -> str:
@@ -282,6 +342,7 @@ async def run(settings: Settings, name: str, *, auto_decide: bool = False) -> Se
         raise SplitbrainError(
             f"Scenario {name!r} has no 'decision:' block, so --auto-decide cannot close a conflict."
         )
+    await check_stale_claims(settings, scenario)
     state = bootstrap.load_state(settings)
     if state.mattermost is None or not state.mattermost.password:
         raise SplitbrainError("Run 'uv run splitbrain bootstrap' before seeding a scenario.")
