@@ -52,8 +52,15 @@ from ..switch.events import (
     SubscriptionChangedFrame,
     SwitchFrame,
 )
-from ..tui import CandidateLink, ClaimView, SentinelTui
-from .base import AgentRuntime, configure_logging, print_banner, reply_thread
+from ..tui import CandidateLink, ClaimView, SentinelTui, evidence_step_text
+from .base import (
+    LOG_FORMAT,
+    TUI_LOG_FORMAT,
+    AgentRuntime,
+    configure_logging,
+    print_banner,
+    reply_thread,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -139,6 +146,7 @@ class Sentinel:
         self.candidates_sent = 0
         self.consent_pending: dict[tuple[str, str], ConsentPending] = {}
         self.corrected: set[str] = set()
+        self._noted_conflict_rooms: set[str] = set()
 
     async def start(self) -> None:
         self.worker = asyncio.create_task(self._extraction_loop(), name="sentinel-extraction")
@@ -190,6 +198,19 @@ class Sentinel:
                 if item.get("channel_type"):
                     self.channel_types[room_id] = str(item["channel_type"])
 
+    def _note_conflict_room(self, room_id: str) -> None:
+        """Stamp the room step when the room appears, not when people decide."""
+        if self.tui is None:
+            return
+        name = self.rooms.get(room_id, "")
+        if not name.startswith("conflict-") or name in self._noted_conflict_rooms:
+            return
+        candidate_id = self.tui.active_candidate
+        if not candidate_id or not name.startswith(f"conflict-{candidate_id}"):
+            return
+        self._noted_conflict_rooms.add(name)
+        self.tui.add_step(candidate_id, "room", f"room #{name}")
+
     async def _claim_room(self, room_id: str) -> None:
         if not room_id or room_id in self.claimed:
             return
@@ -217,6 +238,7 @@ class Sentinel:
         for room in self.state.rooms.values():
             await self._claim_room(room.room_id)
         for room_id in frame.rooms:
+            self._note_conflict_room(room_id)
             await self._claim_room(room_id)
 
     async def _on_subscription(self, frame: SubscriptionChangedFrame) -> None:
@@ -225,6 +247,7 @@ class Sentinel:
             await self._refresh_rooms()
         for room_id in frame.rooms:
             if isinstance(room_id, str):
+                self._note_conflict_room(room_id)
                 await self._claim_room(room_id)
 
     async def _on_room_join(self, frame: RoomJoinFrame) -> None:
@@ -238,6 +261,7 @@ class Sentinel:
             return
         logger.info("Our agent joined a room; claiming it")
         await self._refresh_rooms()
+        self._note_conflict_room(frame.room_id)
         await self._claim_room(frame.room_id)
 
     # ── Ingestion ────────────────────────────────────────────────────────────
@@ -255,8 +279,7 @@ class Sentinel:
             return
         step = self.tui.add_step
         if kind == "evidence" and isinstance(payload, Evidence):
-            detail = payload.detail or payload.summary
-            step(candidate_id, "evidence", f"evidence: {_one_line(detail, 120)}")
+            step(candidate_id, "evidence", f"evidence: {evidence_step_text(payload)}")
         elif kind == "verdict":
             step(
                 candidate_id,
@@ -306,6 +329,7 @@ class Sentinel:
             # A room created or joined after the stream opened: claim it before
             # its history moves past the cursor, and keep this message anyway.
             await self._refresh_rooms()
+            self._note_conflict_room(room_id)
             await self._claim_room(room_id)
             if room_id not in self.rooms:
                 logger.warning("Unknown room %s; using its id as the room name", room_id[:8])
@@ -754,7 +778,10 @@ def build_runtime(
     store = ClaimStore(db_path)
 
     view = SentinelTui(llm_settings) if tui_enabled else None
-    configure_logging(handler=view.log_handler() if view is not None else None)
+    configure_logging(
+        handler=view.log_handler() if view is not None else None,
+        log_format=TUI_LOG_FORMAT if view is not None else LOG_FORMAT,
+    )
     print_banner(AGENT_NAME, llm_settings)
     if view is not None:
         view.start()

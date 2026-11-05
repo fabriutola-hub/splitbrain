@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 import textwrap
 import threading
 from collections import deque
@@ -28,6 +29,7 @@ from rich.text import Text
 
 from .bootstrap import DEMO_USER_DISPLAY_NAMES
 from .config import LLMSettings
+from .core.models import Evidence
 
 WIDTH = 120
 HEIGHT = 32
@@ -88,6 +90,32 @@ def _first_name(author: str) -> str:
     return _display_name(author).split()[0]
 
 
+def terminal_size() -> tuple[int, int]:
+    """The real console size; a redirected run falls back to rich's default."""
+    try:
+        size = os.get_terminal_size()
+    except OSError:
+        return Console().size.width, Console().size.height
+    return size.columns, size.lines
+
+
+def evidence_step_text(evidence: Evidence) -> str:
+    """The evidence *content*, never the repository/source prefix.
+
+    A live Verifier answer carries both: `summary` is the finding and `detail`
+    starts with "GitHub, owner/repo:". Show the milestone move in one line, the
+    same sentence the replay snapshot uses.
+    """
+    text = _one_line(evidence.summary or evidence.detail or "")[:240]
+    move = re.search(
+        r"issue #(\d+).*?moved from (Q[1-4] \d{4}) to (Q[1-4] \d{4})", text, re.IGNORECASE
+    )
+    if move:
+        return f"GitHub issue #{move.group(1)} moved {move.group(2)} → {move.group(3)}"
+    text = re.sub(r"^GitHub, [^:]+:\s*", "", text, flags=re.IGNORECASE)
+    return text.split(" Timeline:")[0].strip() or "no independent evidence"
+
+
 @dataclass(frozen=True, slots=True)
 class IncomingMessage:
     room: str
@@ -145,13 +173,17 @@ class SentinelTui:
         self,
         llm: LLMSettings | None = None,
         *,
-        width: int = WIDTH,
-        height: int = HEIGHT,
+        width: int | None = None,
+        height: int | None = None,
     ) -> None:
         self.llm = llm
-        self.width = width
-        self.height = height
-        self.body_height = height - LOG_HEIGHT - 1
+        detected_width, detected_height = terminal_size()
+        # A live view must fit the actual terminal: otherwise rich Live keeps
+        # reprinting and the scrollback fills with copies of the header.
+        self.width = width if width is not None else detected_width
+        self.height = height if height is not None else detected_height
+        self.log_height = 4 if self.height <= 24 else LOG_HEIGHT
+        self.body_height = self.height - self.log_height - 1
         self.messages: deque[IncomingMessage] = deque(maxlen=MAX_MESSAGES)
         self.claims: deque[ClaimView] = deque(maxlen=12)
         self.logs: deque[str] = deque(maxlen=MAX_LOGS)
@@ -171,8 +203,8 @@ class SentinelTui:
         if console_env.get("TERM", "").lower() in {"", "dumb", "unknown"}:
             console_env["TERM"] = "xterm-256color"
         self._console = Console(
-            width=width,
-            height=height,
+            width=self.width,
+            height=self.height,
             force_terminal=True,
             color_system="standard",
             legacy_windows=False,
@@ -189,7 +221,7 @@ class SentinelTui:
             get_renderable=self.render,
             console=self._console,
             refresh_per_second=4,
-            screen=False,
+            screen=True,
             transient=False,
         )
         self._live.start()
@@ -301,15 +333,16 @@ class SentinelTui:
             ),
             style="bold white on blue",
         )
-        log_lines = [_fit(line, inner) for line in logs[-MAX_LOGS:]]
-        while len(log_lines) < MAX_LOGS:
+        visible_logs = self.log_height - 2
+        log_lines = [_fit(line, inner) for line in logs[-visible_logs:]]
+        while len(log_lines) < visible_logs:
             log_lines.insert(0, "")
         log = Panel(
             Text("\n".join(log_lines)),
             title="LOG",
             border_style="grey50",
             width=self.width,
-            height=LOG_HEIGHT,
+            height=self.log_height,
             padding=(0, 1),
         )
         return Group(header, main, log)

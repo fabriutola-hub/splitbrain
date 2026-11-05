@@ -182,3 +182,106 @@ def test_filtered_messages_are_dimmed() -> None:
         5,
     )
     assert lines[0][1] == "dim"
+
+
+def test_live_uses_the_alternate_screen_and_the_real_terminal_height(
+    monkeypatch,
+) -> None:
+    from io import StringIO
+
+    from rich.console import Console
+
+    import splitbrain.tui as tui_module
+
+    monkeypatch.setattr(tui_module, "terminal_size", lambda: (120, 24))
+    view = SentinelTui(_llm())  # type: ignore[arg-type]
+    assert (view.width, view.height) == (120, 24)
+    assert view._console.height == 24
+    view._console = Console(width=120, height=24, force_terminal=True, file=StringIO())
+    view.start()
+    try:
+        assert view._live is not None
+        assert view._live._screen is True
+    finally:
+        view.stop()
+
+
+def test_render_fits_a_24_row_terminal_without_scrolling() -> None:
+    text = _render(sso_view(width=120, height=24))
+    assert len(text.splitlines()) <= 24
+    assert text.count("SPLITBRAIN SENTINEL | LLM") == 1
+    assert "corrections posted in #sales," in text and "#engineering" in text
+    assert all(len(line) <= 120 for line in text.splitlines())
+
+
+def test_evidence_step_shows_the_finding_not_the_repository() -> None:
+    from splitbrain.core.models import Evidence
+    from splitbrain.tui import evidence_step_text
+
+    evidence = Evidence(
+        candidate_id="sb-0001",
+        source="github",
+        status="supports_b",
+        summary=(
+            'issue #2 "SSO (SAML / OIDC) for enterprise customers" moved from '
+            "Q4 2026 to Q1 2027 on Nov 4."
+        ),
+        detail=(
+            "GitHub, fabriutola-hub/splitbrain-demo-roadmap: issue #2 moved from "
+            "Q4 2026 to Q1 2027 on Nov 4. Timeline: milestoned Q4 2026."
+        ),
+        items=[],
+    )
+    assert evidence_step_text(evidence) == "GitHub issue #2 moved Q4 2026 → Q1 2027"
+
+
+def test_room_step_is_stamped_when_the_room_appears() -> None:
+    from splitbrain import seed
+    from splitbrain.agents.sentinel import Sentinel
+    from splitbrain.tui import CandidateLink, ClaimView
+
+    view = SentinelTui(_llm(), width=120, height=32)  # type: ignore[arg-type]
+    view.add_candidate(
+        CandidateLink(
+            candidate_id="sb-0001",
+            a=ClaimView("sales", "maria", "SSO", "Acme", "Dec 1", "clm_1"),
+            b=ClaimView("engineering", "tomas", "SSO", "*", "Q4 removed", "clm_2"),
+            confidence=0.9,
+            reason="dates",
+        )
+    )
+    view.add_step("sb-0001", "candidate", "candidate sent", at="00:42:19")
+    sentinel = Sentinel(
+        agent=object(),  # type: ignore[arg-type]
+        llm=object(),  # type: ignore[arg-type]
+        store=object(),  # type: ignore[arg-type]
+        state=seed.synthetic_state(),
+        tui=view,
+    )
+    sentinel.rooms["r-conflict"] = "conflict-sb-0001-sso"
+    sentinel._note_conflict_room("r-conflict")
+    room_step = next(s for s in view.steps["sb-0001"] if s.text.startswith("room #"))
+    assert room_step.text == "room #conflict-sb-0001-sso"
+    assert room_step.at != "00:43:17"
+    # A later sb:decided must not restamp the room step.
+    view.add_step("sb-0001", "room", "room #LATE", at="00:43:17")
+    assert [s.text for s in view.steps["sb-0001"]].count("room #conflict-sb-0001-sso") == 1
+
+
+def test_tui_log_lines_are_time_and_event_only() -> None:
+    from splitbrain.agents.base import LOG_DATE_FORMAT, TUI_LOG_FORMAT
+
+    formatter = logging.Formatter(TUI_LOG_FORMAT, datefmt=LOG_DATE_FORMAT)
+    record = logging.LogRecord(
+        "splitbrain.agents.sentinel",
+        logging.INFO,
+        "sentinel.py",
+        1,
+        "Asked @%s for consent in #%s (%s)",
+        ("tomas", "engineering", "sb-1847"),
+        None,
+    )
+    line = formatter.format(record)
+    assert "INFO" not in line
+    assert "splitbrain.agents.sentinel" not in line
+    assert line.endswith("Asked @tomas for consent in #engineering (sb-1847)")

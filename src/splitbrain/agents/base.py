@@ -21,6 +21,8 @@ from ..switch.events import MessageFrame, SwitchFrame
 logger = logging.getLogger(__name__)
 
 LOG_FORMAT = "%(asctime)s %(levelname)-7s %(name)-30s %(message)s"
+# The TUI footer is narrow and already labelled LOG: only the time and the event.
+TUI_LOG_FORMAT = "%(asctime)s %(message)s"
 LOG_DATE_FORMAT = "%H:%M:%S"
 
 
@@ -34,7 +36,9 @@ class FrameProcessor(Protocol):
     async def aclose(self) -> None: ...
 
 
-def configure_logging(handler: logging.Handler | None = None) -> None:
+def configure_logging(
+    handler: logging.Handler | None = None, *, log_format: str = LOG_FORMAT
+) -> None:
     """Send all logs to stdout, or to the TUI's in-memory footer when --tui."""
     root = logging.getLogger()
     root.setLevel(logging.INFO)
@@ -42,7 +46,7 @@ def configure_logging(handler: logging.Handler | None = None) -> None:
         root.removeHandler(existing)
     if handler is None:
         handler = logging.StreamHandler(sys.stdout)
-    handler.setFormatter(logging.Formatter(LOG_FORMAT, datefmt=LOG_DATE_FORMAT))
+    handler.setFormatter(logging.Formatter(log_format, datefmt=LOG_DATE_FORMAT))
     root.addHandler(handler)
     # One line per HTTP request would drown the stream events in the demo logs.
     logging.getLogger("httpx").setLevel(logging.WARNING)
