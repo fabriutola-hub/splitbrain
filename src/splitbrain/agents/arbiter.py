@@ -90,9 +90,8 @@ def _slug(text: str, limit: int = SLUG_LIMIT) -> str:
 
 
 def _person(author: str) -> str:
-    """Use the person's name, not just their platform handle, in the record."""
-    name = bootstrap.DEMO_USER_DISPLAY_NAMES.get(author)
-    return f"{name} (@{author})" if name else author
+    """Use the person's name alone: Mattermost already renders handles as names."""
+    return bootstrap.DEMO_USER_DISPLAY_NAMES.get(author, author)
 
 
 def verdict_for(confidence: float, evidence_status: str) -> str:

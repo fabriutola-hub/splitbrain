@@ -115,8 +115,10 @@ def test_brief_cites_both_quotes_only_after_consent() -> None:
     brief = arbiter._brief(denied)
     assert "@maria @tomas" in brief
     assert "Confirmed with Acme" in brief
-    assert "sales, María Gómez (@maria)," in brief
-    assert "engineering (private), Tomás Rivera (@tomas)," in brief
+    assert "sales, María Gómez, Nov" in brief
+    assert "engineering (private), Tomás Rivera, Nov" in brief
+    assert "(@maria)" not in brief and "(@tomas)" not in brief
+    assert '".' not in brief and '"!' not in brief and '"?' not in brief
     assert "UTC" in brief
     assert "We're pulling SSO out of Q4" not in brief
     assert "(quote withheld at the author's request)" in brief
@@ -131,8 +133,9 @@ def test_decision_record_is_open_and_contains_evidence_and_origins() -> None:
     record = arbiter._open_record(verification(granted=False))
     assert "Status: OPEN" in record
     assert "SB-0001 decision record" in record
-    assert "Claim A - #sales, María Gómez (@maria)," in record
-    assert "Tomás Rivera (@tomas)," in record
+    assert "Claim A - #sales, María Gómez," in record
+    assert "Tomás Rivera," in record
+    assert "(@maria)" not in record
     assert "moved from Q4 2026 to Q1 2027 on Nov 4" in record
     assert "origin: #sales (maria)" in record
     assert "origin: #engineering (tomas)" in record
@@ -296,4 +299,5 @@ async def test_decision_message_shows_the_record_people_can_read() -> None:
     assert "(proposed by @tomas, confirmed by @maria," in message
     assert "UTC" in message
     assert message.endswith("Correcting the original threads now.")
+    assert '".' not in message and '"!' not in message and '"?' not in message
     assert "Decided at:" in item.record and "UTC" in item.record

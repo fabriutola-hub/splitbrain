@@ -18,6 +18,7 @@ from typing import Any
 
 from .. import bootstrap
 from ..config import LLMSettings, Settings, SplitbrainError
+from ..core.decision import quoted_sentence
 from ..core.matcher import match_report
 from ..core.models import (
     Candidate,
@@ -576,7 +577,7 @@ class Sentinel:
             topic = f"{topic} for {decided.scope}"
         body = (
             f"Update: {authors} resolved a conflict about {topic} in "
-            f'#{decided.conflict_room_name}. Decision: "{decided.decision.text}" '
+            f"#{decided.conflict_room_name}. Decision: {quoted_sentence(decided.decision.text)} "
             "Please use this from now on."
         )
         for origin in decided.origins:

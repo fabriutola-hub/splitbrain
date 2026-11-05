@@ -221,3 +221,42 @@ def test_contrast_after_a_confirmation_word_does_not_close_the_decision(text: st
     assert outcome.state == DecisionState.PROPOSED
     assert outcome.reply is None
     assert machine.handle("tomas", "confirm").state == DecisionState.DECIDED
+
+
+@pytest.mark.parametrize("ending", [".", "!", "?", ". "])
+def test_quoted_sentence_never_doubles_terminal_punctuation(ending: str) -> None:
+    from splitbrain.core.decision import quoted_sentence
+
+    text = f"SSO beta for Acme on December 15{ending.rstrip()}"
+    result = quoted_sentence(text)
+    assert result.startswith('"') and result.endswith('"')
+    assert '"."' not in result and '"!"' not in result and '"?"' not in result
+
+
+def test_quoted_sentence_adds_one_full_stop_when_missing() -> None:
+    from splitbrain.core.decision import quoted_sentence
+
+    assert quoted_sentence("SSO in Q1") == '"SSO in Q1".'
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "SSO beta for Acme on December 15, GA in Q1. I'll tell Acme today.",
+        "SSO ships in Q1!",
+        "Are we shipping in Q1?",
+    ],
+)
+def test_proposal_announcement_has_no_doubled_full_stop(text: str) -> None:
+    machine = DecisionMachine("maria", "tomas")
+    outcome = machine.handle("maria", f"decision: {text}")
+    assert outcome.reply is not None
+    assert f'"{text}"' in outcome.reply
+    assert '".' not in outcome.reply and '"!' not in outcome.reply and '"?' not in outcome.reply
+
+
+def test_proposal_without_terminal_punctuation_gets_exactly_one_stop() -> None:
+    machine = DecisionMachine("maria", "tomas")
+    outcome = machine.handle("maria", "decision: SSO in Q1")
+    assert outcome.reply is not None
+    assert 'Proposal from @maria: "SSO in Q1". @tomas' in outcome.reply

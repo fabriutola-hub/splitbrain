@@ -13,6 +13,18 @@ from datetime import UTC, datetime
 from enum import StrEnum
 
 PROPOSAL_RE = re.compile(r"^\s*(?:decision|decisión)\s*:\s*(.+?)\s*$", re.IGNORECASE)
+TERMINAL_PUNCTUATION = (".", "!", "?")
+
+
+def quoted_sentence(text: str) -> str:
+    """A quoted literal as a sentence, never with a doubled full stop.
+
+    Mattermost renders `@maria` as `@María Gómez`; a proposal whose text already
+    ends in ".", "!" or "?" must not get another "." after the closing quote.
+    """
+    ending = "" if text.rstrip().endswith(TERMINAL_PUNCTUATION) else "."
+    return f'"{text}"{ending}'
+
 
 # Longer phrases first: "confirmed" must win over "confirm", "okay" over "ok".
 # A confirmation has to start the message; the tail lookahead accepts trailing
@@ -109,7 +121,7 @@ class DecisionMachine:
             self.confirmed_by = None
             self.state = DecisionState.PROPOSED
             return self._outcome(
-                f'Proposal from @{author}: "{self.decision}". '
+                f"Proposal from @{author}: {quoted_sentence(self.decision)} "
                 f"@{self._other(author)}, reply confirm to close it, "
                 "or write your own decision: ...",
                 announce=True,

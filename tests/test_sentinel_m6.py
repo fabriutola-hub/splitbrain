@@ -321,6 +321,7 @@ async def test_corrections_go_to_both_original_threads_and_close_the_loop(
         assert body.startswith("Update: @maria and @tomas resolved a conflict about SSO for Acme")
         assert "#conflict-sb-0001-sso" in body
         assert 'Decision: "SSO beta for Acme on December 15, GA in Q1."' in body
+        assert '".' not in body and '"!' not in body and '"?' not in body
         assert await fix.store.claim_by_id("clm_maria") is not None
         assert (await fix.store.claim_by_id("clm_maria")).status == ClaimStatus.RESOLVED
         assert (await fix.store.claim_by_id("clm_tomas")).status == ClaimStatus.RESOLVED
@@ -334,5 +335,21 @@ async def test_corrections_go_to_both_original_threads_and_close_the_loop(
         # Idempotency: a redelivered sb:decided does not post corrections twice.
         await fix.sentinel.on_frame(decided_frame())
         assert len(fix.agent.posts) == 2
+    finally:
+        await fix.sentinel.aclose()
+
+
+async def test_correction_punctuation_when_decision_has_no_trailing_stop(
+    llm_factory: Any, tmp_path: Path
+) -> None:
+    fix = await make_fixture(tmp_path, llm_factory)
+    try:
+        unpunctuated = decided_frame()
+        unpunctuated.payload.body = unpunctuated.payload.body.replace(
+            "SSO beta for Acme on December 15, GA in Q1.", "SSO in Q1"
+        )
+        await fix.sentinel.on_frame(unpunctuated)
+        body = fix.agent.posts[0]["body"]
+        assert 'Decision: "SSO in Q1". Please use this from now on.' in body
     finally:
         await fix.sentinel.aclose()
