@@ -1,0 +1,27 @@
+{
+  "input": {
+    "author": "lucia",
+    "message_id": "sso-1",
+    "room": "support",
+    "text": "Reminder: the support desk closes at 6 pm this week while half the team is at the offsite."
+  },
+  "model": "deepseek-ai/DeepSeek-V4.1-Flash-1017",
+  "output": {
+    "claims": [
+      {
+        "confidence": 0.85,
+        "effective_date": null,
+        "kind": "status",
+        "polarity": "affirm",
+        "scope": "*",
+        "scope_key": "*",
+        "subject": "support desk hours",
+        "subject_key": "support-desk-hours",
+        "value": "closes at 6 pm this week"
+      }
+    ],
+    "message_id": "sso-1"
+  },
+  "recorded_at": "2026-11-05T03:44:32+00:00",
+  "task": "extract"
+}

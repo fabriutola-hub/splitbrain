@@ -8,6 +8,7 @@ room once it exists. Every wait has an explicit timeout and says what it expecte
 from __future__ import annotations
 
 import asyncio
+import json
 import time
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
@@ -32,6 +33,7 @@ BRIEF_TIMEOUT_S = 90.0
 CORRECTIONS_TIMEOUT_S = 120.0
 POLL_S = 0.5
 
+SEED_STATE_FILE = "seeded_scenarios.json"
 CONSENT_QUESTION_MARKER = "May I quote it in a private resolution room"
 BRIEF_MARKER = "Splitbrain found two statements"
 CORRECTIONS_MARKER = "Corrections posted"
@@ -123,43 +125,87 @@ def synthetic_state() -> bootstrap.BootstrapState:
     )
 
 
-async def check_stale_claims(settings: Settings, scenario: Scenario) -> None:
-    """Refuse a re-seed when an earlier run left active claims in these rooms.
+def _state_dir(settings: Settings) -> Path | None:
+    directory = getattr(settings.paths, "state_dir", None)
+    return Path(directory) if directory is not None else None
 
-    M6 showed the failure mode: an old active claim pairs with the new message
-    and produces a second candidate whose correction lands in the old thread.
+
+def _stack_id(settings: Settings) -> str:
+    """The ops room id identifies the stack; a wipe creates a different one."""
+    directory = _state_dir(settings)
+    if directory is None:
+        return ""
+    path = directory / "state.json"
+    if not path.is_file():
+        return ""
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return ""
+    ops = (data.get("rooms") or {}).get("splitbrain-ops") or {}
+    return str(ops.get("room_id") or "")
+
+
+def read_seeded(settings: Settings) -> list[str]:
+    """Scenarios already posted against this stack (empty after a wipe)."""
+    directory = _state_dir(settings)
+    if directory is None:
+        return []
+    path = directory / SEED_STATE_FILE
+    if not path.is_file():
+        return []
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return []
+    if data.get("stack_id") != _stack_id(settings):
+        return []
+    return sorted({str(name) for name in data.get("scenarios", [])})
+
+
+def mark_seeded(settings: Settings, name: str) -> None:
+    directory = _state_dir(settings)
+    if directory is None:
+        return
+    directory.mkdir(parents=True, exist_ok=True)
+    scenarios = sorted({*read_seeded(settings), name})
+    (directory / SEED_STATE_FILE).write_text(
+        json.dumps({"stack_id": _stack_id(settings), "scenarios": scenarios}, indent=2) + "\n",
+        encoding="utf-8",
+    )
+
+
+async def check_stale_claims(settings: Settings, scenario: Scenario) -> None:
+    """Only a second run of the SAME scenario on the SAME stack is refused.
+
+    A different scenario is allowed even though earlier claims are still active:
+    `near-misses` deliberately follows `sso` and must produce no candidate.
     """
     from .agents import sentinel as sentinel_agent  # local: DB_FILENAME is patchable
 
-    state_dir = getattr(settings.paths, "state_dir", None)
-    if state_dir is None:
+    seeded = read_seeded(settings)
+    if scenario.name not in seeded:
         return
-    db_path = Path(state_dir) / sentinel_agent.DB_FILENAME
-    if not db_path.is_file():
-        return
-    store = ClaimStore(db_path)
-    try:
-        active = await store.active_claims()
-    finally:
-        await store.close()
-    rooms = {message.room for message in scenario.messages}
-    people = set(scenario.people)
-    stale = [
-        claim
-        for claim in active
-        if claim.room_name in rooms
-        and claim.author in people
-        and not claim.room_name.startswith("conflict-")
-    ]
-    if not stale:
-        return
+    directory = _state_dir(settings)
+    active = []
+    if directory is not None:
+        db_path = directory / sentinel_agent.DB_FILENAME
+        if db_path.is_file():
+            store = ClaimStore(db_path)
+            try:
+                active = await store.active_claims()
+            finally:
+                await store.close()
     sample = ", ".join(
-        f"#{claim.room_name}/{claim.author}: {claim.subject_key}" for claim in stale[:4]
+        f"#{claim.room_name}/{claim.author}: {claim.subject_key}" for claim in active[:4]
     )
+    sources = ", ".join(repr(name) for name in seeded)
     raise SplitbrainError(
-        f"Sentinel still holds {len(stale)} active claim(s) from an earlier run of "
-        f"scenario {scenario.name!r} ({sample}). Re-seeding would pair them with the new "
-        "messages and create a second, stale conflict. Clean up first:\n"
+        f"Scenario {scenario.name!r} was already seeded on this stack "
+        f"(.splitbrain/{SEED_STATE_FILE} lists {sources}). The Sentinel holds "
+        f"{len(active)} active claim(s) ({sample or 'none'}). Re-posting the same "
+        "messages would pair them with themselves and create a second, stale "
+        "conflict. Clean up first:\n"
         "  uv run splitbrain demo                  # wipes the stack and starts clean\n"
         "  uv run splitbrain down --wipe && uv run splitbrain up && uv run splitbrain bootstrap\n"
         "or delete just .splitbrain/sentinel.db (then restart the Sentinel)."
@@ -389,6 +435,7 @@ async def run(settings: Settings, name: str, *, auto_decide: bool = False) -> Se
                 team,
             )
         print(f"Scenario {name!r} posted ({total} messages).", flush=True)
+        mark_seeded(settings, name)
         return SeedResult(scenario=name, posted=posted, conflict_room_name=conflict_room_name)
     finally:
         for user in users.values():

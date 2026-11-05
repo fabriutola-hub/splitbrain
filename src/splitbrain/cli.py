@@ -6,6 +6,7 @@ import argparse
 import asyncio
 import sys
 from collections.abc import Sequence
+from typing import Any
 
 from . import bootstrap, demo, evaluation, recording, seed, stack
 from .agents import arbiter as arbiter_agent
@@ -216,7 +217,25 @@ async def _dispatch(args: argparse.Namespace) -> int:
     return 0
 
 
+def _utf8_console(streams: Sequence[Any] | None = None) -> None:
+    """Windows redirected output defaults to a legacy codepage; keep UTF-8.
+
+    With `splitbrain demo > log.txt`, an em dash in a banner used to arrive as a
+    replacement character. `errors="replace"` keeps the stream writable even
+    when a caller replaces stdout with something that cannot be reconfigured.
+    """
+    targets = streams if streams is not None else (sys.stdout, sys.stderr)
+    for stream in targets:
+        reconfigure = getattr(stream, "reconfigure", None)
+        if reconfigure is not None:
+            try:
+                reconfigure(encoding="utf-8", errors="replace")
+            except (ValueError, OSError):
+                pass
+
+
 def main(argv: Sequence[str] | None = None) -> int:
+    _utf8_console()
     args = build_parser().parse_args(argv)
     try:
         return asyncio.run(_dispatch(args))

@@ -1,4 +1,4 @@
-"""M7: demo modes, clean-state guard, scenario evidence, times and banners."""
+"""Demo modes, clean-state guard, scenario evidence, times and banners."""
 
 from __future__ import annotations
 
@@ -15,7 +15,7 @@ from splitbrain.agents import arbiter as arbiter_module
 from splitbrain.config import Paths, SplitbrainError
 from splitbrain.core.models import Claim, Evidence, EvidenceItem
 from splitbrain.core.store import ClaimStore
-from splitbrain.core.timefmt import resolve_zone, stamp, zone_label
+from splitbrain.core.timefmt import resolve_zone, stamp, stamp_iso, zone_label
 from splitbrain.evidence import scenario as scenario_evidence
 from splitbrain.evidence.github import FIXTURE_BANNER, GitHubSnapshot, build_evidence
 from splitbrain.llm.cassette import normalize_text
@@ -117,18 +117,22 @@ def _claim(room: str, author: str, text: str) -> Claim:
     )
 
 
-async def test_seed_refuses_active_claims_from_a_previous_run(tmp_path: Path) -> None:
+async def test_seed_refuses_only_a_repeat_of_the_same_scenario(tmp_path: Path) -> None:
     store = ClaimStore(tmp_path / "sentinel.db")
     try:
         await store.add_claim(_claim("sales", "maria", "SSO live on December 1"))
     finally:
         await store.close()
     fake = SimpleNamespace(paths=SimpleNamespace(root=ROOT, state_dir=tmp_path))
-    scenario = seed.load_scenario(SimpleNamespace(paths=SimpleNamespace(root=ROOT)), "sso")
+    stub = SimpleNamespace(paths=SimpleNamespace(root=ROOT))
+    seed.mark_seeded(fake, "sso")
+    # A different scenario runs even with old active claims in the store.
+    await seed.check_stale_claims(fake, seed.load_scenario(stub, "near-misses"))
     with pytest.raises(SplitbrainError) as error:
-        await seed.check_stale_claims(fake, scenario)
+        await seed.check_stale_claims(fake, seed.load_scenario(stub, "sso"))
     message = str(error.value)
-    assert "active claim(s) from an earlier run" in message
+    assert "'sso'" in message
+    assert "already seeded on this stack" in message
     assert "down --wipe" in message
     assert "sentinel.db" in message
 
@@ -148,7 +152,7 @@ def test_synthetic_state_covers_every_demo_room() -> None:
 # ── Scenarios, template and cassettes ──────────────────────────────────────
 
 
-def test_refunds_and_hackathon_scenarios_match_spec_410() -> None:
+def test_refunds_and_hackathon_scenarios_are_consistent() -> None:
     stub = SimpleNamespace(paths=SimpleNamespace(root=ROOT))
     refunds = seed.load_scenario(stub, "refunds")
     assert {m.person for m in refunds.messages} >= {"lucia", "pablo"}
@@ -312,15 +316,21 @@ def test_refund_evidence_points_at_issue_5() -> None:
 
 
 def test_stamps_are_never_bare_hours(monkeypatch: pytest.MonkeyPatch) -> None:
+    import re
+
     monkeypatch.delenv("SPLITBRAIN_TZ", raising=False)
-    utc = stamp(1793776781000)
-    assert utc.endswith("UTC")
-    assert "UTC (no SPLITBRAIN_TZ set)" == zone_label()
-    monkeypatch.setenv("SPLITBRAIN_TZ", "America/Caracas")
     local = stamp(1793776781000)
-    assert local.endswith("UTC-04:00")
+    assert re.search(r"UTC[+-]\d{2}:\d{2}$", local)
+    assert zone_label().startswith("Local time (UTC")
+    from datetime import UTC, datetime
+
+    assert stamp_iso(datetime.fromtimestamp(1793776781, UTC).isoformat()) == local
+
+    monkeypatch.setenv("SPLITBRAIN_TZ", "America/Caracas")
+    caracas = stamp(1793776781000)
+    assert caracas.endswith("UTC-04:00")
     assert "America/Caracas" in zone_label()
-    assert utc.split()[-2] != local.split()[-2]
+    assert caracas.split()[-2] != local.split()[-2] or local.endswith("UTC-04:00")
     monkeypatch.setenv("SPLITBRAIN_TZ", "Mars/Olympus")
     with pytest.raises(SplitbrainError, match="not a valid IANA time zone"):
         resolve_zone()
@@ -331,10 +341,11 @@ def test_brief_times_carry_a_zone(monkeypatch: pytest.MonkeyPatch) -> None:
 
     monkeypatch.delenv("SPLITBRAIN_TZ", raising=False)
     assert "UTC" in arbiter.stamp(1793776781000)
+    assert "UTC" in arbiter.stamp_iso("2026-11-05T03:18:00+00:00")
 
 
 async def test_open_conflict_reuses_a_room_that_already_exists() -> None:
-    """M7 idempotency: never call create_room twice for one candidate id."""
+    """Idempotency: never call create_room twice for one candidate id."""
     from splitbrain.agents import arbiter as arbiter_module
     from splitbrain.core.protocol import CandidatePacket, PacketClaim
 

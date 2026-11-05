@@ -1,4 +1,4 @@
-"""M0 tests: CLI surface, milestone stubs and fail-loud settings."""
+"""CLI surface and fail-loud settings."""
 
 from __future__ import annotations
 
@@ -234,3 +234,22 @@ def test_compose_args_use_the_pinned_project(
     assert str(settings.paths.env_file) in args
     assert str(settings.paths.compose_file) in args
     assert settings.health_url.endswith("/health")
+
+
+def test_cli_reconfigures_output_streams_to_utf8() -> None:
+    class FakeStream:
+        def __init__(self) -> None:
+            self.encoding = "cp1252"
+            self.errors = "strict"
+
+        def reconfigure(self, *, encoding: str, errors: str) -> None:
+            self.encoding = encoding
+            self.errors = errors
+
+    class NoReconfigure:
+        pass
+
+    out, err = FakeStream(), FakeStream()
+    cli._utf8_console((out, err, NoReconfigure()))
+    assert (out.encoding, out.errors) == ("utf-8", "replace")
+    assert (err.encoding, err.errors) == ("utf-8", "replace")

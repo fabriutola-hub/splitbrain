@@ -1,4 +1,4 @@
-"""M4 seed scenarios: format, validation and the near-miss contract."""
+"""Seed scenarios: format, validation and the near-miss contract."""
 
 from __future__ import annotations
 
@@ -102,3 +102,52 @@ def test_conflict_room_names_are_filtered_from_both_registry_shapes() -> None:
     ]
     assert asyncio.run(seed._conflict_rooms(FakeAgent(bare))) == {"conflict-sb-0001-sso"}
     assert asyncio.run(seed._conflict_rooms(FakeAgent({"rooms": bare}))) == {"conflict-sb-0001-sso"}
+
+
+def _state_settings(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
+    paths = SimpleNamespace(root=tmp_path, state_dir=tmp_path / ".splitbrain")
+    (tmp_path / ".splitbrain").mkdir()
+    (tmp_path / ".splitbrain" / "state.json").write_text(
+        '{"rooms": {"splitbrain-ops": {"room_id": "ops-1"}}}', encoding="utf-8"
+    )
+    monkeypatch.setattr(seed, "SEED_STATE_FILE", "seeded-it.json")
+    return SimpleNamespace(paths=paths)
+
+
+async def test_guard_blocks_only_a_repeat_of_the_same_scenario(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    config = _state_settings(tmp_path, monkeypatch)
+    sso = seed.load_scenario(settings(), "sso")
+    near = seed.load_scenario(settings(), "near-misses")
+
+    await seed.check_stale_claims(config, sso)  # nothing seeded yet
+    seed.mark_seeded(config, "sso")
+    assert seed.read_seeded(config) == ["sso"]
+    await seed.check_stale_claims(config, near)  # a different scenario is allowed
+
+    with pytest.raises(SplitbrainError) as error:
+        await seed.check_stale_claims(config, sso)
+    message = str(error.value)
+    assert "'sso'" in message
+    assert "lists 'sso'" in message
+    assert "already seeded on this stack" in message
+
+
+def test_seeded_state_is_invalidated_by_a_new_stack(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    config = _state_settings(tmp_path, monkeypatch)
+    seed.mark_seeded(config, "sso")
+    assert seed.read_seeded(config) == ["sso"]
+    (tmp_path / ".splitbrain" / "state.json").write_text(
+        '{"rooms": {"splitbrain-ops": {"room_id": "ops-2"}}}', encoding="utf-8"
+    )
+    assert seed.read_seeded(config) == []
+
+
+def test_sso_noise_does_not_mention_refunds() -> None:
+    scenario = seed.load_scenario(settings(), "sso")
+    noise = next(m.text for m in scenario.messages if m.room == "support")
+    assert "refund" not in noise.casefold()
+    assert "support desk" in noise

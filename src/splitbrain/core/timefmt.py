@@ -1,27 +1,25 @@
 """Unambiguous wall-clock stamps for briefs and decision records.
 
-A timestamp without a zone is a guess: the M6 brief printed UTC hours with no
-marker. `SPLITBRAIN_TZ` selects a zoneinfo zone (e.g. America/Caracas); without
-it every stamp says UTC explicitly. A zone whose abbreviation is a bare numeric
-offset (tzdata does that for America/Caracas) is expanded to UTC-04:00.
+A timestamp without a zone is a guess. By default every stamp uses the machine's
+local zone and prints its offset (``Nov 4 23:18 UTC-04:00``), which is the hour
+people see in their chat app. ``SPLITBRAIN_TZ`` selects an IANA zone instead and
+still wins when defined.
 """
 
 from __future__ import annotations
 
 import os
-import re
 from datetime import UTC, datetime, tzinfo
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from ..config import SplitbrainError
 
-_NUMERIC_OFFSET = re.compile(r"^[+-]\d{2}(?::?\d{2})?$")
 
-
-def resolve_zone() -> tzinfo:
+def resolve_zone() -> tzinfo | None:
+    """An explicit IANA zone, or None for the machine's own local zone."""
     name = os.environ.get("SPLITBRAIN_TZ", "").strip()
     if not name:
-        return UTC
+        return None
     try:
         return ZoneInfo(name)
     except (ZoneInfoNotFoundError, ValueError) as exc:
@@ -31,26 +29,48 @@ def resolve_zone() -> tzinfo:
         ) from exc
 
 
-def _abbreviation(moment: datetime) -> str:
-    name = moment.tzname() or "UTC"
-    if not _NUMERIC_OFFSET.match(name):
-        return name
-    digits = name.replace(":", "")
-    return f"UTC{digits[:3]}:{digits[3:] or '00'}"
+def _localize(moment: datetime) -> datetime:
+    zone = resolve_zone()
+    return moment.astimezone() if zone is None else moment.astimezone(zone)
+
+
+def _offset_label(moment: datetime) -> str:
+    offset = moment.utcoffset()
+    if offset is None:
+        return moment.tzname() or "UTC"
+    minutes = int(offset.total_seconds() // 60)
+    sign = "+" if minutes >= 0 else "-"
+    hours, rest = divmod(abs(minutes), 60)
+    return f"UTC{sign}{hours:02d}:{rest:02d}"
+
+
+def _format(moment: datetime) -> str:
+    return (
+        f"{moment.strftime('%b')} {moment.day} {moment.strftime('%H:%M')} {_offset_label(moment)}"
+    )
 
 
 def zone_label(zone: tzinfo | None = None) -> str:
     """Human-readable setting for a startup banner, never a guessed hour."""
     selected = zone or resolve_zone()
-    if selected is UTC:
-        return "UTC (no SPLITBRAIN_TZ set)"
+    if selected is None:
+        return f"Local time ({_offset_label(datetime.now().astimezone())})"
     name = getattr(selected, "key", None) or str(selected)
-    return f"{name} ({_abbreviation(datetime.now(UTC).astimezone(selected))})"
+    return f"{name} ({_offset_label(datetime.now(UTC).astimezone(selected))})"
 
 
 def stamp(ts: int) -> str:
-    """`Nov 4 12:49 UTC` or `Nov 4 08:49 UTC-04:00`. Never a bare hour."""
-    zone = resolve_zone()
+    """`Nov 4 23:18 UTC-04:00`, in local time. Never a bare hour."""
     moment = datetime.fromtimestamp(ts / 1000, UTC) if ts > 0 else datetime.now(UTC)
-    local = moment.astimezone(zone)
-    return f"{local.strftime('%b')} {local.day} {local.strftime('%H:%M')} {_abbreviation(local)}"
+    return _format(_localize(moment))
+
+
+def stamp_iso(value: str) -> str:
+    """Render an ISO-8601 decision timestamp with the same local label."""
+    try:
+        moment = datetime.fromisoformat(value)
+    except ValueError as exc:
+        raise SplitbrainError(f"Invalid decision timestamp {value!r}") from exc
+    if moment.tzinfo is None:
+        moment = moment.replace(tzinfo=UTC)
+    return _format(_localize(moment))

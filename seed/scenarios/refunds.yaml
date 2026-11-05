@@ -10,4 +10,4 @@ messages:
   - {room: finance, as: pablo, after_s: 2, text: "Policy update from finance: as of this week the manager-approval threshold is $250, so anything above $250 needs my OK."}
 decision:            # used by --auto-decide
   propose: {as: lucia, text: "decision: Refunds above $250 need manager approval; I'll retire the $500 macro today."}
-  confirm: {as: pablo, text: "confirm"}
+  confirm: {as: pablo, text: "Confirmed, I'll email them now."}
