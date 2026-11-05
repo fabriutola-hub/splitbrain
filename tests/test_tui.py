@@ -116,7 +116,7 @@ def test_linked_claims_are_shown_above_the_lifecycle() -> None:
     output = _render(sso_view())
     pair = (
         "#sales María: SSO for Acme = live on December 1",
-        "⟷ CONTRADICTION ⟷",
+        "↔ CONTRADICTION ↔",
         "#engineering Tomás: SSO = removed from Q4",
     )
     positions = [output.index(line) for line in pair]

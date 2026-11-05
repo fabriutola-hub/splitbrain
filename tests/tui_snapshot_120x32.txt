@@ -4,7 +4,7 @@
 │ ───────────────────────────────────────────────────────────────┼─────────────────────────────────────────────────── │
 │ 23:18  #sales · María Gómez (@maria)                           │ [sb-8510]                                          │
 │   Morning! Big one: confirmed with Acme that SSO will be live  │ #sales María: SSO for Acme = live on December 1    │
-│   for them on December 1.                                      │ ⟷ CONTRADICTION ⟷                                  │
+│   for them on December 1.                                      │ ↔ CONTRADICTION ↔                                  │
 │ 23:18  #support · Lucía Pérez (@lucia)                         │ #engineering Tomás: SSO = removed from Q4          │
 │   Reminder: the support desk closes at 6 pm this week while    │ 23:18:41  ✓ candidate sent (SSO for Acme)          │
 │   half the team is at the offsite.                             │ 23:18:43  ✓ evidence: GitHub issue #2 moved Q4     │

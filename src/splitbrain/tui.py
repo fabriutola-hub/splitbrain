@@ -429,7 +429,7 @@ class SentinelTui:
 
         return [
             (side(link.a), "bold red"),
-            ("⟷ CONTRADICTION ⟷", "bold red"),
+            ("↔ CONTRADICTION ↔", "bold red"),
             (side(link.b), "bold red"),
         ]
 
