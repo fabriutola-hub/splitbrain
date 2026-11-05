@@ -1,0 +1,12 @@
+name: sso-followup
+people: {lucia: "Lucía Pérez", pablo: "Pablo Ruiz"}
+# Decision memory follow-up, seeded AFTER `sso` has been decided:
+#   1: Lucía repeats the outdated December 1 date in #support -> the Sentinel
+#      replies in her thread with the recorded decision instead of opening a
+#      second conflict room, and the Arbiter appends a reminder line to the
+#      decision record.
+#   2: Pablo states the agreed December 15 beta + Q1 GA in #finance ->
+#      compatible with the decision, so the Sentinel stays silent.
+messages:
+  - {room: support, as: lucia, after_s: 0, text: "Quick one for the desk: Acme gets SSO on December 1, so you can confirm it if they ask."}
+  - {room: finance, as: pablo, after_s: 2, text: "Noted for billing: Acme's SSO beta starts December 15 and GA is in Q1."}

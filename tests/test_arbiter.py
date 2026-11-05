@@ -301,3 +301,80 @@ async def test_decision_message_shows_the_record_people_can_read() -> None:
     assert message.endswith("Correcting the original threads now.")
     assert '".' not in message and '"!' not in message and '"?' not in message
     assert "Decided at:" in item.record and "UTC" in item.record
+
+
+async def test_reminded_updates_the_decision_record_and_posts_in_the_conflict_room() -> None:
+    from contextlib import asynccontextmanager
+
+    from splitbrain.core.packets import encode
+    from splitbrain.core.protocol import RemindedPacket
+    from splitbrain.switch.events import MessageFrame, MessagePayload
+
+    class FakeAgent:
+        def __init__(self) -> None:
+            self.updates: list[dict] = []
+            self.posts: list[tuple[str, str]] = []
+
+        @asynccontextmanager
+        async def act_in(self, room_id: str):
+            yield self
+
+        async def op(self, name: str, /, **args) -> dict:
+            self.updates.append({"name": name, **args})
+            return {}
+
+        async def post(self, room_id: str, body: str, **kwargs) -> dict:
+            self.posts.append((room_id, body))
+            return {}
+
+    arbiter = make_arbiter()
+    arbiter.is_holder = True
+    arbiter.coverage.rooms["r-ops"] = "splitbrain-ops"
+    item = verification(granted=True)
+    item.room_id = "r-conflict"
+    item.room_name = "conflict-sb-0001-sso"
+    item.document_id = "doc-1"
+    item.record = (
+        "Status: DECIDED\nDecision: SSO in Q1\n\nCorrections posted in #sales, #engineering"
+    )
+    item.decided = True
+    arbiter.verifications[item.candidate.id] = item
+    fake = FakeAgent()
+    arbiter.agent = fake  # type: ignore[assignment]
+
+    packet = RemindedPacket(
+        candidate_id="sb-0001",
+        conflict_room="r-conflict",
+        conflict_room_name="conflict-sb-0001-sso",
+        room_name="support",
+        author="lucia",
+        message_id="sw_followup_1",
+    )
+    frame = MessageFrame(
+        kind="message",
+        sequence=1,
+        room_id="r-ops",
+        payload=MessagePayload(
+            message_id="sw_reminded",
+            sender_name="splitbrain-sentinel",
+            body="Reminder posted.\n" + encode("reminded", packet),
+            timestamp=1793974320000,
+        ),
+    )
+    await arbiter.on_frame(frame)
+    assert "Reminder: Lucía Pérez repeated the earlier information in #support on " in item.record
+    assert " and was pointed to this decision." in item.record
+    assert fake.updates[-1]["name"] == "update_room_document"
+    assert (
+        "Reminder: Lucía Pérez repeated the earlier information in #support"
+        in (fake.updates[-1]["content"])
+    )
+    assert fake.posts[-1] == (
+        "r-conflict",
+        "Heads-up: Lucía Pérez repeated the earlier information in #support; "
+        "I pointed Lucía Pérez to this decision.",
+    )
+    # Idempotency: redelivering the same sb:reminded does not duplicate the line.
+    await arbiter.on_frame(frame)
+    assert len(fake.posts) == 1
+    assert item.record.count("Reminder: Lucía Pérez") == 1

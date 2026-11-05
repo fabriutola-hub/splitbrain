@@ -34,6 +34,7 @@ from ..core.protocol import (
     LinkTarget,
     OriginRef,
     PacketClaim,
+    RemindedPacket,
     VerdictPacket,
     read_packet,
 )
@@ -173,6 +174,7 @@ class Arbiter:
         self.verifications: dict[str, Verification] = {}
         self.by_room: dict[str, str] = {}
         self.seen_candidates: set[str] = set()
+        self.reminded_messages: set[str] = set()
         self.deferred: list[tuple[MessageFrame, CandidatePacket]] = []
         self.tasks: set[asyncio.Task[None]] = set()
         self.loops: list[asyncio.Task[None]] = []
@@ -381,6 +383,11 @@ class Arbiter:
                 await self._on_corrected(payload)
             else:
                 logger.warning("Ignoring sb:corrected from %s", frame.payload.sender_name)
+        elif kind == "reminded" and isinstance(payload, RemindedPacket):
+            if frame.payload.sender_name == SENTINEL_NAME:
+                await self._on_reminded(frame, payload)
+            else:
+                logger.warning("Ignoring sb:reminded from %s", frame.payload.sender_name)
 
     async def _on_candidate(self, frame: MessageFrame, candidate: CandidatePacket) -> None:
         if frame.room_id != self.ops_room_id:
@@ -917,6 +924,70 @@ class Arbiter:
             )
         await self.agent.post(verification.room_id, f"{line}.")
         logger.info("%s for %s", line, packet.candidate_id)
+
+    async def _on_reminded(self, frame: MessageFrame, packet: RemindedPacket) -> None:
+        """Record a decision-memory reminder in the conflict room document and chat."""
+        if not self.is_holder or packet.message_id in self.reminded_messages:
+            return
+        person = _person(packet.author)
+        when = stamp(frame.payload.timestamp)
+        record_line = (
+            f"Reminder: {person} repeated the earlier information in "
+            f"#{packet.room_name} on {when} and was pointed to this decision."
+        )
+        chat_line = (
+            f"Heads-up: {person} repeated the earlier information in "
+            f"#{packet.room_name}; I pointed {person} to this decision."
+        )
+        verification = self.verifications.get(packet.candidate_id)
+        room_id = (
+            verification.room_id
+            if verification is not None and verification.room_id
+            else packet.conflict_room
+        )
+        if not room_id:
+            return
+        document_id = verification.document_id if verification is not None else ""
+        record = verification.record if verification is not None else ""
+        async with self.agent.act_in(room_id):
+            if not document_id:
+                joined = await self.agent.op("connect_to_room", room_id=room_id)
+                expected = f"{packet.candidate_id.upper()} decision record"
+                documents = (joined.get("documents") if isinstance(joined, dict) else None) or []
+                document_id = next(
+                    (
+                        str(doc["id"])
+                        for doc in documents
+                        if isinstance(doc, dict)
+                        and doc.get("id")
+                        and str(doc.get("name", "")) == expected
+                    ),
+                    "",
+                )
+                if document_id:
+                    loaded = await self.agent.op("load_internal_documents", ids=[document_id])
+                    entries = loaded if isinstance(loaded, list) else []
+                    record = "\n".join(
+                        str(item.get("content", "")) for item in entries if isinstance(item, dict)
+                    )
+            if document_id:
+                updated = f"{record}\n\n{record_line}" if record else record_line
+                if verification is not None:
+                    verification.record = updated
+                await self.agent.op(
+                    "update_room_document",
+                    document_id=document_id,
+                    content=updated,
+                )
+        await self.agent.post(room_id, chat_line)
+        self.reminded_messages.add(packet.message_id)
+        logger.info(
+            "Recorded reminder for %s in #%s (%s in #%s)",
+            packet.candidate_id,
+            packet.conflict_room_name or room_id[:8],
+            packet.author,
+            packet.room_name,
+        )
 
 
 def build_runtime(

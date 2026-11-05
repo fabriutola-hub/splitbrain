@@ -368,6 +368,21 @@ async def _wait_for_packet(
         await asyncio.sleep(POLL_S)
 
 
+async def _wait_for_followup_silence(group: AgentGroup, timeout_s: float = 15.0) -> None:
+    """Wait until the Sentinel has also classified Pablo's compatible follow-up message."""
+    sentinel = next((child for child in group.children if child.name == "sentinel"), None)
+    if sentinel is None:
+        return
+    deadline = time.monotonic() + timeout_s
+    while time.monotonic() < deadline:
+        group.check()
+        lines = list(sentinel.recent)
+        reminder_idx = next((i for i, line in enumerate(lines) if "Reminder posted" in line), -1)
+        if reminder_idx >= 0 and any("No alert:" in line for line in lines[reminder_idx + 1 :]):
+            return
+        await asyncio.sleep(POLL_S)
+
+
 async def _wait_for_conflict(
     group: AgentGroup, observer: SwitchAgent, existing: set[str], timeout_s: float
 ) -> str:
@@ -493,6 +508,7 @@ def print_summary(
     decision: dict[str, Any] | None,
     corrections: list[str],
     note: str,
+    followup_summary: str | None = None,
 ) -> None:
     print("\n" + "=" * 72, flush=True)
     print("DEMO SUMMARY", flush=True)
@@ -524,6 +540,8 @@ def print_summary(
         + (", ".join(f"#{name}" for name in corrections) if corrections else "not posted yet"),
         flush=True,
     )
+    if followup_summary:
+        print(f"Follow-up:     {followup_summary}", flush=True)
     print(f"Note:          {note}", flush=True)
     password = state.mattermost.password if state.mattermost else "(bootstrap incomplete)"
     print("Mattermost (browser):", flush=True)
@@ -552,7 +570,12 @@ def print_summary(
 
 
 async def run(
-    *, scenario: str = "sso", auto_decide: bool = False, offline: bool = False, keep: bool = False
+    *,
+    scenario: str = "sso",
+    auto_decide: bool = False,
+    offline: bool = False,
+    keep: bool = False,
+    followup: bool = False,
 ) -> None:
     if scenario not in seed.ALL_SCENARIOS:
         raise SplitbrainError(f"Unknown demo scenario {scenario!r}")
@@ -560,10 +583,13 @@ async def run(
     modes = resolve_modes(offline=offline, scenario=scenario, paths=paths)
     loaded = seed.load_scenario(Settings.load(require_env_file=False), scenario)
     effective_auto = auto_decide and loaded.decision is not None
+    if followup and (scenario != "sso" or not effective_auto):
+        raise SplitbrainError("--followup requires --scenario sso and --auto-decide.")
     print("=" * 72, flush=True)
+    followup_tag = " | followup=yes" if followup else ""
     print(
         f"Splitbrain demo: scenario={scenario} | auto-decide={'yes' if effective_auto else 'no'}"
-        f" | offline={'yes' if offline else 'no'} | keep={'yes' if keep else 'no'}",
+        f" | offline={'yes' if offline else 'no'} | keep={'yes' if keep else 'no'}{followup_tag}",
         flush=True,
     )
     modes.print_banners()
@@ -601,6 +627,7 @@ async def run(
 
         decision: dict[str, Any] | None = None
         corrections: list[str] = []
+        followup_summary: str | None = None
         note = "conflict room created with both quotes"
         if effective_auto:
             decided = await _wait_for_packet(group, observer, ops_id, "decided", PACKET_TIMEOUT_S)
@@ -610,6 +637,20 @@ async def run(
             )
             corrections = list(corrected.get("rooms", []))
             note = "full loop closed by --auto-decide (decision + corrections)"
+            if followup:
+                await seed.run(settings, "sso-followup")
+                reminded = await _wait_for_packet(
+                    group, observer, ops_id, "reminded", PACKET_TIMEOUT_S
+                )
+                await _wait_for_followup_silence(group)
+                room = str(reminded.get("room_name") or "support")
+                person = bootstrap.DEMO_USER_DISPLAY_NAMES.get(
+                    str(reminded.get("author") or "lucia"), "Lucía Pérez"
+                )
+                followup_summary = (
+                    f"reminder posted in #{room} for {person}; "
+                    "Pablo Ruiz's compatible message stayed silent"
+                )
         elif loaded.decision is not None:
             print_decision_instructions(loaded, conflict_room, settings)
             await _wait_for_packet(group, observer, ops_id, "corrected", HUMAN_DECISION_TIMEOUT_S)
@@ -636,6 +677,7 @@ async def run(
             decision=decision,
             corrections=corrections,
             note=note,
+            followup_summary=followup_summary,
         )
     finally:
         if observer is not None:

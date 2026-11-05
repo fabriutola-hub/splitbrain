@@ -9,6 +9,8 @@ import pytest
 
 from splitbrain import seed
 from splitbrain.config import SplitbrainError
+from splitbrain.core.models import Claim, ClaimKind
+from splitbrain.core.store import ClaimStore
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -33,6 +35,14 @@ def test_sso_scenario_matches_spec_format() -> None:
     assert all(m.after_s >= 0 for m in scenario.messages)
 
 
+def test_sso_followup_scenario_matches_spec_format() -> None:
+    scenario = seed.load_scenario(settings(), "sso-followup")
+    assert scenario.name == "sso-followup"
+    assert [m.room for m in scenario.messages] == ["support", "finance"]
+    assert [m.person for m in scenario.messages] == ["lucia", "pablo"]
+    assert scenario.decision is None
+
+
 def test_near_misses_are_five_to_seven_messages_in_distinct_rooms() -> None:
     scenario = seed.load_scenario(settings(), "near-misses")
     assert 5 <= len(scenario.messages) <= 7
@@ -53,7 +63,9 @@ def test_near_misses_are_five_to_seven_messages_in_distinct_rooms() -> None:
 
 
 def test_unknown_scenario_lists_available_ones() -> None:
-    with pytest.raises(SplitbrainError, match="Available: hackathon, near-misses, refunds, sso"):
+    with pytest.raises(
+        SplitbrainError, match="Available: hackathon, near-misses, refunds, sso, sso-followup"
+    ):
         seed.load_scenario(settings(), "does-not-exist")
 
 
@@ -132,6 +144,43 @@ async def test_guard_blocks_only_a_repeat_of_the_same_scenario(
     assert "'sso'" in message
     assert "lists 'sso'" in message
     assert "already seeded on this stack" in message
+
+
+async def test_sso_followup_guard_requires_an_active_decision(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    config = _state_settings(tmp_path, monkeypatch)
+    followup = seed.load_scenario(settings(), "sso-followup")
+    seed.mark_seeded(config, "sso")
+
+    # Without an active DECISION claim, sso-followup is refused with clear guidance.
+    with pytest.raises(SplitbrainError) as error:
+        await seed.check_stale_claims(config, followup)
+    assert "run `uv run splitbrain demo --auto-decide` first" in str(error.value)
+
+    store = ClaimStore(tmp_path / ".splitbrain" / "sentinel.db")
+    try:
+        await store.add_claim(
+            Claim(
+                id="clm_dec",
+                room_id="r-conflict",
+                room_name="conflict-sb-0001-sso",
+                message_id="decision:sb-0001",
+                author="maria",
+                text="SSO beta for Acme on December 15, GA in Q1.",
+                kind=ClaimKind.DECISION,
+                subject="SSO",
+                subject_key="sso",
+                scope="Acme",
+                scope_key="acme",
+                value="SSO beta for Acme on December 15, GA in Q1.",
+            )
+        )
+    finally:
+        await store.close()
+
+    # Once a decision is recorded, sso-followup is allowed after sso.
+    await seed.check_stale_claims(config, followup)
 
 
 def test_seeded_state_is_invalidated_by_a_new_stack(

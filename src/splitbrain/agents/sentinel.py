@@ -11,6 +11,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import logging
+import re
 import time
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -40,9 +41,11 @@ from ..core.protocol import (
     DecidedPacket,
     LinkedPacket,
     LinkRequestPacket,
+    RemindedPacket,
     read_packet,
 )
 from ..core.store import ClaimStore, pair_id
+from ..core.timefmt import short_day
 from ..llm.cassette import CassetteStore
 from ..llm.client import LLMClient
 from ..switch.client import SwitchAgent
@@ -86,6 +89,47 @@ class ConsentPending:
     thread_root: str
     ops_thread_id: str
     text: str | None
+
+
+def _person(author: str) -> str:
+    """Use the person's name alone, matching the Arbiter's brief and record."""
+    return bootstrap.DEMO_USER_DISPLAY_NAMES.get(author, author)
+
+
+def _decided_ts(decided_at: str) -> int:
+    try:
+        moment = datetime.fromisoformat(decided_at)
+        if moment.tzinfo is None:
+            moment = moment.replace(tzinfo=UTC)
+        return int(moment.timestamp() * 1000)
+    except ValueError:
+        return int(time.time() * 1000)
+
+
+def decision_claim_for(decided: DecidedPacket, *, ts: int | None = None) -> Claim:
+    """Construct the active DECISION claim stored after a conflict is closed."""
+    decision = decided.decision
+    return Claim(
+        kind=ClaimKind.DECISION,
+        subject=decided.subject,
+        subject_key=decided.subject_key,
+        scope=decided.scope,
+        scope_key=decided.scope_key,
+        value=decision.text,
+        polarity="affirm",
+        effective_date=None,
+        confidence=1.0,
+        id=make_claim_id(f"decision:{decided.candidate_id}", 0),
+        room_id=decided.conflict_room,
+        room_name=decided.conflict_room_name,
+        channel_type="channel_public",
+        message_id=f"decision:{decided.candidate_id}",
+        thread_id=None,
+        author=decision.proposed_by,
+        ts=_decided_ts(decision.decided_at) if ts is None else ts,
+        text=decision.text,
+        status=ClaimStatus.ACTIVE,
+    )
 
 
 def ignored_source(message: Message) -> str | None:
@@ -147,6 +191,10 @@ class Sentinel:
         self.candidates_sent = 0
         self.consent_pending: dict[tuple[str, str], ConsentPending] = {}
         self.corrected: set[str] = set()
+        self.decision_authors: dict[str, list[str]] = {}
+        self.ops_threads: dict[str, str] = {}
+        self.reminded_messages: set[str] = set()
+        self.reminded_threads: set[tuple[str, str]] = set()
         self._noted_conflict_rooms: set[str] = set()
 
     async def start(self) -> None:
@@ -390,7 +438,7 @@ class Sentinel:
                 logger.exception("Extraction batch of %d message(s) failed", len(batch))
 
     async def analyze_messages(self, messages: list[Message]) -> None:
-        """The eval pipeline, unchanged: prefilter, extract, match, classify, candidate."""
+        """Prefilter, extract, match, classify, and either remind or raise a candidate."""
         fresh: list[Message] = []
         for message in messages:
             if await self.store.is_processed(message.message_id):
@@ -414,7 +462,8 @@ class Sentinel:
             )
             stored = await self.store.active_claims()
             for new_claim in claims:
-                # Same "first match" rule as Brain._analyze, so eval describes this.
+                # match_report places DECISION claims first so recorded human
+                # decisions always take priority over ordinary stored claims.
                 report = match_report(new_claim, stored)
                 if not report.matches:
                     continue
@@ -437,6 +486,10 @@ class Sentinel:
                         classification.reason,
                     )
                     continue
+                if other.kind == ClaimKind.DECISION:
+                    new_claim.status = ClaimStatus.SUPERSEDED
+                    await self._remind(message, other)
+                    continue
                 candidate = Candidate(
                     id=self._candidate_id(other, new_claim),
                     claim_a=other,
@@ -452,7 +505,7 @@ class Sentinel:
             await self.store.mark_processed(message.message_id)
             self.messages_processed += 1
 
-    # ── Consent, corrections and the link fallback ──────────────────────
+    # ── Consent, corrections, reminders and the link fallback ───────────────
 
     async def _handle_packet(self, frame: MessageFrame, packet: tuple[str, Any]) -> None:
         kind, payload = packet
@@ -466,6 +519,7 @@ class Sentinel:
             await self._answer_link_request(frame, payload)
 
     async def _ask_consent(self, frame: MessageFrame, request: ConsentRequestPacket) -> None:
+        self.ops_threads[request.candidate_id] = reply_thread(frame)
         claim = await self.store.claim_by_id(request.claim_id)
         room_id = claim.room_id if claim is not None else request.room_id
         thread_root = (
@@ -564,6 +618,8 @@ class Sentinel:
         if decided.candidate_id in self.corrected:
             return
         self.corrected.add(decided.candidate_id)
+        self.decision_authors[decided.candidate_id] = list(decided.authors)
+        self.ops_threads[decided.candidate_id] = reply_thread(frame)
         if self.tui is not None:
             self.tui.add_step(decided.candidate_id, "room", f"room #{decided.conflict_room_name}")
             self.tui.add_step(
@@ -581,32 +637,10 @@ class Sentinel:
             "Please use this from now on."
         )
         for origin in decided.origins:
-            await self.agent.post(origin.room_id, body, thread_id=origin.thread_id)
             await self.store.set_status(origin.claim_id, ClaimStatus.RESOLVED)
-        decision = decided.decision
-        await self.store.add_claim(
-            Claim(
-                kind=ClaimKind.DECISION,
-                subject=decided.subject,
-                subject_key=decided.subject_key,
-                scope=decided.scope,
-                scope_key=decided.scope_key,
-                value=decision.text,
-                polarity="affirm",
-                effective_date=None,
-                confidence=1.0,
-                id=make_claim_id(f"decision:{decided.candidate_id}", 0),
-                room_id=decided.conflict_room,
-                room_name=decided.conflict_room_name,
-                channel_type="channel_public",
-                message_id=f"decision:{decided.candidate_id}",
-                thread_id=None,
-                author=decision.proposed_by,
-                ts=int(time.time() * 1000),
-                text=decision.text,
-                status=ClaimStatus.ACTIVE,
-            )
-        )
+        await self.store.add_claim(decision_claim_for(decided))
+        for origin in decided.origins:
+            await self.agent.post(origin.room_id, body, thread_id=origin.thread_id)
         rooms = [f"#{origin.room_name}" for origin in decided.origins]
         packet = CorrectedPacket(
             candidate_id=decided.candidate_id,
@@ -628,6 +662,138 @@ class Sentinel:
                 f"corrections posted in {', '.join(rooms)}",
             )
         logger.info("Corrections posted in %s for %s", ", ".join(rooms), decided.candidate_id)
+
+    @staticmethod
+    def _decision_candidate_id(decision: Claim) -> str:
+        if decision.message_id.startswith("decision:"):
+            return decision.message_id.removeprefix("decision:")
+        match = re.match(r"^conflict-(sb-[0-9a-z]+)-", decision.room_name)
+        return match.group(1) if match else decision.id
+
+    async def _read_decision_record(self, decision: Claim, candidate_id: str) -> str | None:
+        """Read the conflict room document from Switch and confirm Status: DECIDED."""
+        try:
+            async with self.agent.act_in(decision.room_id):
+                joined = await self.agent.op("connect_to_room", room_id=decision.room_id)
+                documents = (joined.get("documents") if isinstance(joined, dict) else None) or []
+                expected = f"{candidate_id.upper()} decision record"
+                document_id = next(
+                    (
+                        str(doc["id"])
+                        for doc in documents
+                        if isinstance(doc, dict)
+                        and doc.get("id")
+                        and str(doc.get("name", "")) == expected
+                    ),
+                    None,
+                )
+                if document_id is None:
+                    document_id = next(
+                        (
+                            str(doc["id"])
+                            for doc in documents
+                            if isinstance(doc, dict) and doc.get("id")
+                        ),
+                        None,
+                    )
+                if document_id is None:
+                    logger.error(
+                        "Cannot verify decision %s in #%s: no room document found; "
+                        "refusing to post reminder",
+                        candidate_id,
+                        decision.room_name,
+                    )
+                    return None
+                loaded = await self.agent.op("load_internal_documents", ids=[document_id])
+        except Exception:
+            logger.error(
+                "Failed to read decision record for %s in #%s; refusing to post reminder",
+                candidate_id,
+                decision.room_name,
+                exc_info=True,
+            )
+            return None
+        entries = (
+            loaded
+            if isinstance(loaded, list)
+            else (loaded.get("documents") if isinstance(loaded, dict) else None) or []
+        )
+        content = "\n".join(
+            str(item.get("content", "")) for item in entries if isinstance(item, dict)
+        )
+        if "Status: DECIDED" not in content:
+            logger.error(
+                "Decision record for %s in #%s does not have 'Status: DECIDED'; "
+                "refusing to post reminder",
+                candidate_id,
+                decision.room_name,
+            )
+            return None
+        return content
+
+    def _decision_people(self, decision: Claim, candidate_id: str, record: str) -> str:
+        handles = list(self.decision_authors.get(candidate_id) or ())
+        if not handles:
+            only_match = re.search(r"only @([\w-]+) and @([\w-]+)", record)
+            if only_match:
+                handles = [only_match.group(1), only_match.group(2)]
+        if not handles:
+            prop_match = re.search(
+                r"Proposed by: @([\w-]+).*?Confirmed by: @([\w-]+)", record, re.DOTALL
+            )
+            if prop_match:
+                handles = [prop_match.group(1), prop_match.group(2)]
+        if not handles:
+            handles = [decision.author]
+        return " and ".join(_person(handle) for handle in handles)
+
+    async def _remind(self, message: Message, decision: Claim) -> None:
+        thread_root = message.thread_id or message.message_id
+        thread_key = (message.room_id, thread_root)
+        if message.message_id in self.reminded_messages or thread_key in self.reminded_threads:
+            logger.info(
+                "Reminder already posted for message %s or thread %s in #%s (idempotency)",
+                message.message_id,
+                thread_root[:12],
+                message.room_name,
+            )
+            return
+        candidate_id = self._decision_candidate_id(decision)
+        record = await self._read_decision_record(decision, candidate_id)
+        if record is None:
+            return
+        authors = self._decision_people(decision, candidate_id, record)
+        body = (
+            f"Heads-up: this was already decided. On {short_day(decision.ts)}, "
+            f"{authors} agreed: {quoted_sentence(decision.text)} "
+            f"(decision record in #{decision.room_name}). Please use that instead."
+        )
+        await self.agent.post(message.room_id, body, thread_id=thread_root)
+        person = _person(message.author)
+        packet = RemindedPacket(
+            candidate_id=candidate_id,
+            conflict_room=decision.room_id,
+            conflict_room_name=decision.room_name,
+            room_name=message.room_name,
+            author=message.author,
+            message_id=message.message_id,
+        )
+        await self.agent.targeted(
+            self.ops_room_id,
+            f"Reminder posted in #{message.room_name} for {person} "
+            f"({candidate_id.upper()}, #{decision.room_name}).\n" + encode("reminded", packet),
+            target_roles=["arbiter"],
+            thread_id=self.ops_threads.get(candidate_id),
+        )
+        self.reminded_messages.add(message.message_id)
+        self.reminded_threads.add(thread_key)
+        if self.tui is not None:
+            self.tui.add_step(
+                candidate_id,
+                f"reminder:{message.message_id}",
+                f"reminder → #{message.room_name} {person}",
+            )
+        logger.info("Reminder posted in #%s for %s", message.room_name, candidate_id)
 
     async def _answer_link_request(self, frame: MessageFrame, request: LinkRequestPacket) -> None:
         labels: list[str] = []
@@ -664,6 +830,8 @@ class Sentinel:
         body = self._candidate_body(payload)
         result = await self.agent.targeted(self.ops_room_id, body, target_roles=["arbiter"])
         event_id = result.get("event_id", "?") if isinstance(result, dict) else "?"
+        if isinstance(event_id, str) and event_id != "?":
+            self.ops_threads[candidate.id] = event_id
         self.candidates_sent += 1
         logger.info(
             "CANDIDATE %s sent to arbiter in splitbrain-ops (event %s): %s",

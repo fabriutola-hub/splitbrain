@@ -46,6 +46,7 @@ MEANINGFUL_LOGS: tuple[str, ...] = (
     "Consent ",
     "Asked @",
     "Corrections posted",
+    "Reminder posted",
     "Decision recorded",
     "Consent answer",
 )

@@ -8,6 +8,7 @@ from splitbrain.core.protocol import (
     ConsentPacket,
     DecidedPacket,
     PacketClaim,
+    RemindedPacket,
     read_packet,
     validate,
 )
@@ -110,3 +111,25 @@ def test_decided_packet_requires_a_full_decision() -> None:
         ),
         DecidedPacket,
     )
+
+
+def test_reminded_packet_validation() -> None:
+    assert validate("reminded", {"candidate_id": "sb-0001"}) is None
+    data = {
+        "candidate_id": "sb-0001",
+        "conflict_room": "r-conflict",
+        "conflict_room_name": "conflict-sb-0001-sso",
+        "room_name": "support",
+        "author": "lucia",
+        "message_id": "sw_followup_1",
+    }
+    payload = validate("reminded", data)
+    assert isinstance(payload, RemindedPacket)
+    assert payload.room_name == "support"
+    assert payload.author == "lucia"
+    wire = "Reminder posted in #support.\n" + encode("reminded", payload)
+    parsed = read_packet(wire, "splitbrain-sentinel")
+    assert parsed is not None
+    assert parsed[0] == "reminded"
+    assert isinstance(parsed[1], RemindedPacket)
+    assert read_packet(wire, "lucia") is None

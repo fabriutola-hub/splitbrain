@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import re
 from enum import StrEnum
 from typing import Any, Literal
 
@@ -212,9 +213,10 @@ def make_claim_id(message_id: str, index: int) -> str:
 
 def claim_key(claim: Claim) -> str:
     """Canonical signature of a claim for the semantic classification cache."""
+    room = re.sub(r"^conflict-sb-[0-9a-z]+-", "conflict-", claim.room_name)
     return "|".join(
         (
-            claim.room_name,
+            room,
             claim.author,
             normalize_text(claim.text),
             claim.subject_key,

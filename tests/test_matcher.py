@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from splitbrain.core.matcher import find_matches, match_report
-from splitbrain.core.models import Claim, ClaimStatus
+from splitbrain.core.models import Claim, ClaimKind, ClaimStatus
 
 
 def claim(
@@ -14,6 +14,7 @@ def claim(
     subject: str = "SSO",
     subject_key: str = "sso",
     scope_key: str = "acme",
+    kind: ClaimKind = ClaimKind.COMMITMENT,
     status: ClaimStatus = ClaimStatus.ACTIVE,
 ) -> Claim:
     return Claim(
@@ -23,7 +24,7 @@ def claim(
         author=author,
         message_id=f"m-{identifier}",
         text="placeholder chat text",
-        kind="commitment",
+        kind=kind,
         subject=subject,
         subject_key=subject_key,
         scope="Acme" if scope_key == "acme" else scope_key,
@@ -52,6 +53,19 @@ def test_same_author_is_skipped() -> None:
     report = match_report(new, [claim("old")])
     assert report.matches == []
     assert report.skip_reasons == ("same author",)
+
+
+def test_decision_claims_have_priority_and_ignore_same_author_filter() -> None:
+    new_by_maria = claim("new", room="sales", author="maria")
+    other_claim = claim("ordinary", room="support", author="lucia")
+    decision_claim = claim(
+        "decided",
+        room="conflict-sb-0001-sso",
+        author="maria",
+        kind=ClaimKind.DECISION,
+    )
+    matches = find_matches(new_by_maria, [other_claim, decision_claim])
+    assert [c.id for c in matches] == ["decided", "ordinary"]
 
 
 def test_different_scope_is_skipped() -> None:

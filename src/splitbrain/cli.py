@@ -101,7 +101,9 @@ def build_parser() -> argparse.ArgumentParser:
     )
     seed_parser.add_argument(
         "scenario",
-        help="name of a YAML in seed/scenarios/: sso, refunds, hackathon, near-misses",
+        help=(
+            "name of a YAML in seed/scenarios/: sso, sso-followup, refunds, hackathon, near-misses"
+        ),
     )
     seed_parser.add_argument(
         "--auto-decide",
@@ -139,6 +141,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--keep",
         action="store_true",
         help="reuse the running stack; still reset .splitbrain/sentinel.db",
+    )
+    demo_parser.add_argument(
+        "--followup",
+        action="store_true",
+        help="after the decision and corrections, seed sso-followup to show decision memory",
     )
 
     commands.add_parser(
@@ -181,12 +188,15 @@ async def _dispatch(args: argparse.Namespace) -> int:
         await recording.record_all()
         return 0
     if args.command == "demo":
-        await demo.run(
-            scenario=args.scenario,
-            auto_decide=args.auto_decide,
-            offline=args.offline,
-            keep=args.keep,
-        )
+        demo_kwargs: dict[str, Any] = {
+            "scenario": args.scenario,
+            "auto_decide": args.auto_decide,
+            "offline": args.offline,
+            "keep": args.keep,
+        }
+        if args.followup:
+            demo_kwargs["followup"] = True
+        await demo.run(**demo_kwargs)
         return 0
 
     settings = Settings.load(require_env_file=args.command != "up")

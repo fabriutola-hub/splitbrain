@@ -20,6 +20,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from . import bootstrap
 from .config import Settings, SplitbrainError
+from .core.models import ClaimKind
 from .core.store import ClaimStore
 from .switch.client import SwitchAgent
 from .switch.mattermost import MattermostError, MattermostUser, Post
@@ -179,13 +180,11 @@ async def check_stale_claims(settings: Settings, scenario: Scenario) -> None:
     """Only a second run of the SAME scenario on the SAME stack is refused.
 
     A different scenario is allowed even though earlier claims are still active:
-    `near-misses` deliberately follows `sso` and must produce no candidate.
+    `near-misses` deliberately follows `sso` and must produce no candidate, and
+    `sso-followup` requires an active human decision in the Sentinel store.
     """
     from .agents import sentinel as sentinel_agent  # local: DB_FILENAME is patchable
 
-    seeded = read_seeded(settings)
-    if scenario.name not in seeded:
-        return
     directory = _state_dir(settings)
     active = []
     if directory is not None:
@@ -196,6 +195,17 @@ async def check_stale_claims(settings: Settings, scenario: Scenario) -> None:
                 active = await store.active_claims()
             finally:
                 await store.close()
+    seeded = read_seeded(settings)
+    if scenario.name == "sso-followup" and scenario.name not in seeded:
+        if not any(claim.kind == ClaimKind.DECISION for claim in active):
+            raise SplitbrainError(
+                "Scenario 'sso-followup' requires a recorded human decision in the Sentinel "
+                "store, and none was found: run `uv run splitbrain demo --auto-decide` first "
+                "(or close the conflict in Mattermost before seeding sso-followup)."
+            )
+        return
+    if scenario.name not in seeded:
+        return
     sample = ", ".join(
         f"#{claim.room_name}/{claim.author}: {claim.subject_key}" for claim in active[:4]
     )

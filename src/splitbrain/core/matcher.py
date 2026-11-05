@@ -7,7 +7,7 @@ from dataclasses import dataclass
 
 from rapidfuzz import fuzz
 
-from .models import Claim, ClaimStatus
+from .models import Claim, ClaimKind, ClaimStatus
 from .store import pair_id
 
 SUBJECT_SIMILARITY = 88
@@ -48,7 +48,7 @@ def match_report(
         if pair_id(new, other) in seen:
             reasons.append("pair already seen")
             continue
-        if other.author.casefold() == new.author.casefold():
+        if other.kind != ClaimKind.DECISION and other.author.casefold() == new.author.casefold():
             reasons.append("same author")
             continue
         if not _same_subject(new, other):
@@ -58,6 +58,7 @@ def match_report(
             reasons.append("different scope")
             continue
         matches.append(other)
+    matches.sort(key=lambda item: 0 if item.kind == ClaimKind.DECISION else 1)
     return MatchReport(matches=matches, skip_reasons=tuple(sorted(set(reasons))))
 
 

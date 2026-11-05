@@ -143,6 +143,15 @@ class CorrectedPacket(WireModel):
     rooms: list[str]
 
 
+class RemindedPacket(WireModel):
+    candidate_id: str
+    conflict_room: str
+    conflict_room_name: str
+    room_name: str
+    author: str
+    message_id: str
+
+
 class LinkTarget(WireModel):
     room_id: str
     label: str
@@ -171,6 +180,7 @@ PACKET_MODELS: dict[str, type[BaseModel]] = {
     "consent": ConsentPacket,
     "decided": DecidedPacket,
     "corrected": CorrectedPacket,
+    "reminded": RemindedPacket,
     "link_request": LinkRequestPacket,
     "linked": LinkedPacket,
 }

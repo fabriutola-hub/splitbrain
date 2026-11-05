@@ -74,3 +74,10 @@ def stamp_iso(value: str) -> str:
     if moment.tzinfo is None:
         moment = moment.replace(tzinfo=UTC)
     return _format(_localize(moment))
+
+
+def short_day(ts: int) -> str:
+    """`Nov 5`, in local time (or SPLITBRAIN_TZ when set)."""
+    moment = datetime.fromtimestamp(ts / 1000, UTC) if ts > 0 else datetime.now(UTC)
+    local = _localize(moment)
+    return f"{local.strftime('%b')} {local.day}"
