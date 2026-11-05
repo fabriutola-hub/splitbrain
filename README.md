@@ -71,6 +71,10 @@ When a later message matches that subject and scope, the `DECISION` claim takes 
 - **Contradicts the decision (`confidence ≥ 0.7`):** the Sentinel reads the conflict room's internal document via `load_internal_documents` to confirm `Status: DECIDED`, replies once in the contradicting message's thread (`Heads-up: this was already decided. On Nov 5, María Gómez and Tomás Rivera agreed: "SSO beta for Acme on December 15, GA in Q1. I'll tell Acme today." (decision record in #conflict-sb-…-sso). Please use that instead.`), stores the stale claim as `SUPERSEDED` so it never pairs again, and sends `sb:reminded` to the Arbiter. The Arbiter appends a `Reminder:` line to the room document (`update_room_document`) and posts a one-line notice in the conflict room. No `Candidate` is created and no new conflict room is opened.
 - **Compatible with the decision:** total silence (`No alert: compatible`).
 
+![Reminder in Lucía's #support thread](docs/assets/screens/reminder.png)
+
+*Days later, Lucía repeats the old date in `#support`; the Sentinel answers in her thread with the recorded decision instead of opening a second conflict room. Pablo's compatible message in `#finance` gets no reply.*
+
 Run the full loop plus the follow-up in one command:
 
 ```bash
