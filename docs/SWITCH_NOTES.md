@@ -91,7 +91,7 @@ Accept: text/event-stream
 - `sender_name` is the Mattermost username for people and the agent name for agents. Treat `sender` as opaque.
 - Our own posts and other agents' posts also arrive on the stream: **filter out messages whose `sender_name` is one of our agent names**, and anything with `sender_kind == "platform"`.
 - `room_join` frames: `{"member","member_name","timestamp","listening"}`. Ignore them except for logging.
-- Sequence numbers are large integers (> 2^53 is possible); store them as Python `int`, never as float.
+- Sequence numbers are large integers (observed just below 2^53; store as int because the protocol does not bound it) — use Python `int`, never `float`.
 
 ## Heartbeat
 
@@ -214,7 +214,8 @@ of the original `message` event. If the original message was itself a reply, use
   test claims the room explicitly before posting.
 - After claiming, a Mattermost post that does **not** mention the agent arrives as `event: message`
   with `payload.addressed=false`, `sender_name` = the Mattermost username, `channel_type` and a
-  `sequence` of `9007194959773696` (> 2^53, Python `int`). `connection_state` carries
+  `sequence` of `9007194959773696` (observed just below 2^53; store as int because the
+  protocol does not bound it). `connection_state` carries
   `server.version="0.31.0"`, `protocol=9`, `heartbeat_interval_seconds=2.0`. Control frames
   (`connection_state`, `subscription_changed`, ...) have **no `type` field in their data** — the
   SSE `event:` name is the kind; domain events carry both. Keepalives are bare `:` comments.

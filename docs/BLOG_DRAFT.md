@@ -34,7 +34,7 @@ All of it is provisioned in one `create_room_from_yaml` call: [`templates/splitb
 
 `GET /agents/{id}/events?connection_id=<uuid>&scope=all&filter=all&start_from=head` returns a first `connection_state` frame with `rooms=[]`, `protocol=9`, `heartbeat_interval_seconds=2.0` and the server version. That does **not** mean the stream will see every room from then on. Coverage grows one room at a time: each `connect_to_room(room_id)` emits exactly one `subscription_changed` with `reason="subscription updated"` and a single-element `rooms` list. Creating a room alone emits nothing.
 
-So an agent that listens to "everything" still has to claim every room it cares about, and re-claim when it sees `room_join`, a subscription change, or a message with an unknown `room_id` ([`src/splitbrain/agents/coverage.py`](../src/splitbrain/agents/coverage.py)). Related: `start_from=head` with a fresh connection id does not replay old messages after a restart. Your own `processed_messages` / `pairs_seen` table is the real idempotency guard, not the stream. Also keep `sequence` as a Python `int`: we observed `9007194959773696` (~9.0e15, just under 2^53) and the protocol allows even larger values, so a float conversion will lose event ids.
+So an agent that listens to "everything" still has to claim every room it cares about, and re-claim when it sees `room_join`, a subscription change, or a message with an unknown `room_id` ([`src/splitbrain/agents/coverage.py`](../src/splitbrain/agents/coverage.py)). Related: `start_from=head` with a fresh connection id does not replay old messages after a restart. Your own `processed_messages` / `pairs_seen` table is the real idempotency guard, not the stream. Also keep `sequence` as a Python `int`: we observed `9007194959773696` (~9.0e15, just below 2^53) and the protocol does not bound it, so a float conversion will lose event ids.
 
 ### 2. Switch will greet your users for you — turn that off
 
@@ -82,12 +82,12 @@ The published image and the source checkout disagree in small, breaking ways. `G
 
 Two more protocol details worth knowing on day one: `send_targeted_message(body, target_roles=["arbiter"])` works even when nobody holds the role (it posts `@arbiter …` and returns `target_statuses: {}`), so your Sentinel can publish before your Arbiter starts; and `post_message(body, thread_id=<root's Switch message_id>)` shows up as a reply in the Mattermost thread. Keep every chat message readable as plain text — Slack does not render Markdown tables.
 
-**The Windows tax.** This machine sets `TERM=dumb`, which makes `rich.live.Live` silently skip every refresh; `Console(force_terminal=True, legacy_windows=False, _environ={"TERM": "xterm-256color"})` fixes it. Loopback HTTP needs `httpx.AsyncClient(trust_env=False)` because `HTTP_PROXY` is set without `NO_PROXY` and otherwise breaks Gateway login; keep `trust_env=True` for the LLM and GitHub. Windows has no system IANA time-zone database, so `zoneinfo` needs `tzdata`. And if WSL uses `networkingMode=mirrored`, Docker Desktop can stop forwarding published ports to `localhost` after a network change — `networkingMode=nat` in `%USERPROFILE%\.wslconfig` is the fix. None of this is Switch's fault, but it will eat your first afternoon.
+**The Windows tax.** Two of the quirks above came from inside our coding agent's sandbox, not from Windows: inside that sandbox `TERM=dumb` made `rich.live.Live` skip every refresh (`Console(force_terminal=True, legacy_windows=False, _environ={"TERM": "xterm-256color"})` fixes it), and `HTTP_PROXY`/`HTTPS_PROXY` were set without `NO_PROXY`, so a proxied loopback call to the Gateway came back with a misleading 401. That is why Splitbrain's loopback clients (Switch, Gateway, Mattermost, health checks) use `httpx.AsyncClient(trust_env=False)` while the internet-facing clients (LLM, GitHub) keep httpx's default `trust_env=True`; on a machine without those sandbox variables the setting is harmless. Separately, on Windows itself: there is no system IANA time-zone database, so `zoneinfo` needs `tzdata`; and if WSL uses `networkingMode=mirrored`, Docker Desktop can stop forwarding published ports to `localhost` after a network change — `networkingMode=nat` in `%USERPROFILE%\.wslconfig` is the fix. None of this is Switch's fault, but it will eat your first afternoon.
 
 ## Run the demo yourself
 
 ```bash
-git clone <URL-of-this-repo> splitbrain && cd splitbrain
+git clone https://github.com/fabriutola-hub/splitbrain.git splitbrain && cd splitbrain
 uv sync
 uv run splitbrain demo --auto-decide
 ```

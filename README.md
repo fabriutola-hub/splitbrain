@@ -8,21 +8,21 @@ Sales promises Acme that SSO will be live on December 1, in a public channel. En
 
 <!-- GIF: docs/assets/demo.gif (recorded by Fabrizio) -->
 
-*The conflict room `conflict-sb-XXXX-sso` is created with María and Tomás in it, both quotes, the GitHub evidence and an open decision record.*
+*The moment a conflict room such as `conflict-sb-8510-sso` is created with María and Tomás in it, both quotes, the GitHub evidence and an open decision record.*
 
 ## Quick start
 
 Works on Windows, macOS and Linux with [uv](https://docs.astral.sh/uv/) and Docker running. Three commands:
 
 ```bash
-git clone <URL-of-this-repo> splitbrain && cd splitbrain
+git clone https://github.com/fabriutola-hub/splitbrain.git splitbrain && cd splitbrain
 uv sync
 uv run splitbrain demo --auto-decide
 ```
 
-No API key is needed: with no `SPLITBRAIN_LLM_API_KEY`, the demo replays committed model cassettes (`cassettes/`); add `--offline` to also use `seed/github_fixture.json` instead of calling GitHub, so there are no LLM or GitHub network calls. `up` generates `deploy/.env` with fresh secrets and starts the pinned Switch 0.31.0 compose project (profiles `collab` and `gateway`); the first run also pulls the Docker images.
+Reproducibility: tested from a fresh clone with no `.env.local` and no API key; `demo --auto-decide` closes the loop and exits 0 (also with `--offline`).
 
-This checkout has no `git remote` configured yet — use the submission URL for `<URL-of-this-repo>`. The M7 acceptance check used a local clone with no `.env.local`, no `deploy/.env` and no `.venv`: `uv run splitbrain demo --auto-decide` reached `Corrections posted` and exited 0, twice (`docs/SWITCH_NOTES.md`, "Verified in M7"). Repeating it with `--offline` also exited 0.
+No API key is needed: with no `SPLITBRAIN_LLM_API_KEY`, the demo replays committed model cassettes (`cassettes/`); add `--offline` to also use `seed/github_fixture.json` instead of calling GitHub, so there are no LLM or GitHub network calls. `up` generates `deploy/.env` with fresh secrets and starts the pinned Switch 0.31.0 compose project (profiles `collab` and `gateway`); the first run also pulls the Docker images.
 
 After the demo, open Mattermost at **http://localhost:8065** and log in as `maria` or `tomas` with the shared password printed in the `DEMO SUMMARY` (the same logins are printed by `uv run splitbrain bootstrap`). That summary also prints direct links to `sales`, `engineering` and the conflict room. The Gateway UI is at http://localhost:3000. `uv run splitbrain --help` lists every command.
 
@@ -32,19 +32,20 @@ Switch is not a notification channel bolted on at the end: rooms, roles, referen
 
 | Switch feature | File in this repo | Why it is there |
 | --- | --- | --- |
-| Own SSE protocol client: `GET /agents/{id}/events?scope=all&filter=all&start_from=head`, 2 s heartbeat (6 s TTL), `Last-Event-ID` resume on the **same** `connection_id`, backoff capped at 5 s | `src/splitbrain/switch/sse.py`, `src/splitbrain/switch/events.py`, `src/splitbrain/switch/client.py` | No SDK. `scope=all&filter=all` is what lets the Sentinel see messages that do **not** mention an agent (`addressed=false`); `sequence` is kept as a Python `int` because observed values are ~9.0e15 and the protocol allows values above 2^53. Heartbeat 404/409 reopens the stream instead of backing off. |
+| Own SSE protocol client: `GET /agents/{id}/events?scope=all&filter=all&start_from=head`, 2 s heartbeat (6 s TTL), `Last-Event-ID` resume on the **same** `connection_id`, backoff capped at 5 s | `src/splitbrain/switch/sse.py`, `src/splitbrain/switch/events.py`, `src/splitbrain/switch/client.py` | No SDK. `scope=all&filter=all` is what lets the Sentinel see messages that do **not** mention an agent (`addressed=false`); `sequence` is kept as a Python `int` because observed values are ~9.0e15 (just below 2^53) and the protocol does not bound them. Heartbeat 404/409 reopens the stream instead of backing off. |
 | `create_room(..., user_names=[...], agent_names=[...])` | `src/splitbrain/agents/arbiter.py` (`_open_conflict`) | Conflict rooms are created at runtime with exactly the two claim authors plus the Arbiter and Sentinel, and the room instructions say only those two people may close it. |
-| `add_users_to_room` | `docs/SWITCH_NOTES.md` ("Operations"), `templates/splitbrain.template.yaml`, `src/splitbrain/agents/arbiter.py` | **Verified against the server, not used by Splitbrain:** `users:` in the group template and `user_names` in `create_room` put people in a room in the same call that creates it. We keep the probe result documented instead of claiming an operation we never call. |
-| `link_rooms` | `src/splitbrain/agents/arbiter.py` (`_link_origins`), `src/splitbrain/bootstrap.py`, `src/splitbrain/agents/sentinel.py` (`sb:link_request` fallback) | A conflict room links back to both origin rooms with labels `origin: #sales (maria)` and `origin: #engineering (tomas)`. Verified in M5: linking works even when the caller is not a member of the target room. |
+| `link_rooms` | `src/splitbrain/agents/arbiter.py` (`_link_origins`), `src/splitbrain/bootstrap.py`, `src/splitbrain/agents/sentinel.py` (`sb:link_request` fallback) | A conflict room links back to both origin rooms with labels `origin: #sales (maria)` and `origin: #engineering (tomas)`. Verified against the server: linking works even when the caller is not a member of the target room. |
 | `create_room_document` / `update_room_document` | `src/splitbrain/agents/arbiter.py` (`_open_conflict`, `_on_decided`, `_on_corrected`) | The decision record is a Switch room document: `Status: OPEN` at creation, then `DECIDED` with the exact words the two people wrote, then a final `Corrections posted in #sales, #engineering` line. |
 | `send_targeted_message` to roles and names, in a thread | `src/splitbrain/switch/client.py` (`targeted`), `src/splitbrain/agents/sentinel.py`, `src/splitbrain/agents/arbiter.py`, `src/splitbrain/agents/verifier.py`, `src/splitbrain/core/packets.py` | All inter-agent traffic is readable chat in `splitbrain-ops` plus one `sb:<kind> {json}` line: Sentinel → `target_roles=["arbiter"]`, Arbiter → `target_roles=["verifier"]`, Arbiter/Verifier → `target_names=["splitbrain-sentinel"]`. Replies stay in the originating thread. |
-| `read_context` | `src/splitbrain/demo.py`, `src/splitbrain/agents/arbiter.py` | Acceptance reads and the demo's polling of packets work without an open stream (`connection=False`); `threads` is oldest-first, so the tail is freshest. |
+| `read_context` | `src/splitbrain/demo.py`, `src/splitbrain/agents/arbiter.py` | The demo's packet polling and verification reads work without an open stream (`connection=False`); `threads` is oldest-first, so the tail is freshest. |
 | `connect_to_room` | `src/splitbrain/switch/client.py` (`act_in`), `src/splitbrain/agents/coverage.py` | "The connected room" is connection state, so every connect+act sequence is serialized under one `asyncio.Lock` per connection. A `scope=all` stream opens with **empty** coverage: claiming a room is also how an agent starts receiving its events. |
 | Exclusive `arbiter` role + standby `arbiter-b`, and the deterministic tie-break for the lease bug | `templates/splitbrain.template.yaml`, `src/splitbrain/agents/arbiter.py` (`_claim_lease`), `src/splitbrain/demo.py`, `scripts/probe_arbiter_lease.py` | One Arbiter acts; the standby retries every 5 s and takes over after the holder's 6 s heartbeat TTL lapses. Because 0.31.0 can grant the exclusive lease twice in a race, `_claim_lease` re-reads `held_by`, keeps the alphabetically first holder and makes the other call `release_role` — before *every* candidate. See "What we found" below. |
 | GitHub reference attached to a room | `src/splitbrain/bootstrap.py`, `src/splitbrain/agents/verifier.py`, `src/splitbrain/evidence/github.py`, `seed/github_fixture.json` | `create_reference(type="github", value={"urls": [...]})` + `attach_reference_to_room` put the roadmap repo on `splitbrain-ops`. The Verifier reads the URL from `connect_to_room(ops).references`, never from chat text, and checks issue milestones and their timeline (`Q4 2026 → Q1 2027`). |
 | `create_room_from_yaml` group template | `templates/splitbrain.template.yaml`, `templates/hackathon.template.yaml`, `src/splitbrain/bootstrap.py` | One call creates the `Acme` group: five rooms (one private), the exclusive `arbiter` and shared `verifier` roles with their instructions, the "How Splitbrain works" document and all four `watches` links. Bootstrap is idempotent; the second template adds the two hackathon rooms. |
 | Gateway: greetings off, addressing policy open | `src/splitbrain/switch/gateway.py`, `src/splitbrain/bootstrap.py` | A new agent is owner-only and the bridge posts "Hey! Ping @agent…" in every room it joins. `set_greetings(bridge_id, False)` keeps the agents silent; `open_addressing(agent_id)` lets unclaimed Mattermost users address them. Splitbrain still enforces "only the two authors decide" itself. |
 | Mattermost bridge (and Slack / Discord / Teams) | `src/splitbrain/switch/mattermost.py`, `src/splitbrain/seed.py`, `deploy/docker-compose.yml` | Agents only ever talk to Switch; the Switch bridge maps rooms to chat channels. That is why the same flow works on any chat app the Gateway bridges — the bridging is Switch's job, not Splitbrain's. **Only** the demo seeding script uses the Mattermost REST API, to post as people. We ran the stack against Mattermost only; chat output is deliberately table-free plain text because Slack does not render Markdown tables. |
+
+People join rooms through `users:` in the template and `user_names` in `create_room`; `add_users_to_room` was verified but is not needed.
 
 ## Architecture
 
@@ -57,10 +58,10 @@ flowchart TB
     O -->|"target_roles=[arbiter]"| A["Arbiter<br/>exclusive role; arbiter-b on standby"]
     A -->|"sb:evidence_request · target_roles=[verifier]"| V["Verifier<br/>GitHub reference on the room"]
     V -->|"sb:evidence · issue #2 moved Q4 2026 → Q1 2027"| A
-    A -->|"sb:Verdict confirmed → sb:consent_request"| S
+    A -->|"sb:verdict confirmed → sb:consent_request"| S
     S -->|"consent asked in Tomás's own thread → yes → sb:consent"| C["Consent granted"]
     C -->|"create_room + link_rooms + create_room_document"| A
-    A --> R["conflict-sb-XXXX-sso<br/>María + Tomás only"]
+    A --> R["conflict-sb-8510-sso<br/>María + Tomás only"]
     R -->|"decision: ... / confirm"| D["Human decision"]
     D -->|"update_room_document DECIDED + sb:decided"| A
     A -->|"sb:decided"| S
@@ -97,7 +98,7 @@ From `docs/SPEC.md` §3; they are enforced in code, not just prose.
 
 `uv run splitbrain eval` runs the same prefilter → extraction → matching → classification → candidate pipeline as the Sentinel over the 44 labeled pairs in `eval/dataset.jsonl` (18 contradictions, 4 updates, 8 compatible, 14 unrelated), prints the metrics and writes `eval/results.md`. It is offline by default: it replays 129 committed semantic cassettes (94 extraction, 35 classification) and makes no network calls. `uv run splitbrain record` refreshes them with a live model; `uv run splitbrain eval --mode live` needs an API key. A replay miss raises `ReplayMiss` naming the input — it never invents an answer.
 
-Latest committed run (`eval/results.md`, 2026-11-04, mode `replay`, model `deepseek-ai/DeepSeek-V4.1-Flash-1017` via `https://api.river.ai/v1`):
+Recorded run (`eval/results.md`, 2026-11-04, mode `replay`, model `deepseek-ai/DeepSeek-V4.1-Flash-1017` via `https://api.river.ai/v1`):
 
 | metric | contradiction |
 | --- | --- |
@@ -113,13 +114,13 @@ Latest committed run (`eval/results.md`, 2026-11-04, mode `replay`, model `deeps
 | compatible | 0 | 0 | 7 | 1 |
 | unrelated | 0 | 0 | 0 | 14 |
 
-Near-contradictions it rejects, in `eval/dataset.jsonl` and `seed/scenarios/near-misses.yaml`: the same feature for a different customer (Acme 99.9% vs Globex 99.5% SLA); a person correcting their own earlier statement; a December beta and Q1 general availability being two phases of one rollout (`No alert: compatible (confidence 0.90)`); a question ("are we still shipping…?") and a hypothetical ("if we delayed…") that extract zero claims; and a later message from the same team that already supersedes. Running `seed near-misses` produces no candidate and no conflict room (`docs/SWITCH_NOTES.md`, "Verified in M6").
+Near-contradictions it rejects, in `eval/dataset.jsonl` and `seed/scenarios/near-misses.yaml`: the same feature for a different customer (Acme 99.9% vs Globex 99.5% SLA); a person correcting their own earlier statement; a December beta and Q1 general availability being two phases of one rollout (`No alert: compatible (confidence 0.90)`); a question ("are we still shipping…?") and a hypothetical ("if we delayed…") that extract zero claims; and a later message from the same team that already supersedes. Running `seed near-misses` produces no candidate and no conflict room (see the lab notebook, `docs/SWITCH_NOTES.md`).
 
 The three errors are real and listed in `eval/results.md`: two false negatives where a global commitment ("99.5% for all customers", "net 30 for all new contracts") is labelled a contradiction against a specific signed customer promise but classified `unrelated` on scope, and one compatible pair rejected by the matcher (different subject). We did not tune the dataset to hide them.
 
 ## What we found in Switch 0.31.0
 
-Everything in this section was run against a real local 0.31.0 stack; the full log is in `docs/SWITCH_NOTES.md` ("Verified in M0"…"Verified in M7").
+Everything in this section was run against a real local 0.31.0 stack. The raw observations are in the lab notebook, `docs/SWITCH_NOTES.md`.
 
 **Race in the EXCLUSIVE role lease.** Two `assume_role("arbiter")` calls fired in the same `asyncio.gather` both returned HTTP 200, and `get_room_detail(splitbrain-ops).roles[arbiter].held_by` then contained **two** agents — the list order changed between runs. When A already holds the lease, B is correctly refused with HTTP 400 `Role 'arbiter' is exclusive and currently held by another agent`. Reproduce it with:
 
@@ -128,14 +129,14 @@ uv run splitbrain up && uv run splitbrain bootstrap     # no Arbiter running
 uv run python scripts/probe_arbiter_lease.py
 ```
 
-Observed output (two consecutive runs, 2026-11-04): `held_by BEFORE: []`, two `HTTP 200` results, then `held_by AFTER simultaneous assume: ['splitbrain-arbiter-b', 'splitbrain-arbiter']` / `['splitbrain-arbiter', 'splitbrain-arbiter-b']`, `RESULT: exclusive lease granted to TWO agents (server race)`. In the first M7 demo both Arbiters posted verdicts and both created the same-named conflict room — Switch allows duplicate room names. Mitigation kept in this repo (without hiding the server behaviour): `Arbiter._claim_lease()` re-reads `held_by` after assuming, keeps only the alphabetically first holder, makes the other `release_role()` (no arguments; releases only the caller's lease), and repeats the check before acting on every candidate; `_open_conflict` looks the room name up with `list_all_rooms` and reuses it; `demo` starts `arbiter-b` only after the primary's lease is confirmed. Failover still works after the 6 s heartbeat TTL. This is worth reporting upstream.
+Observed output (two consecutive runs, 2026-11-04): `held_by BEFORE: []`, two `HTTP 200` results, then `held_by AFTER simultaneous assume: ['splitbrain-arbiter-b', 'splitbrain-arbiter']` / `['splitbrain-arbiter', 'splitbrain-arbiter-b']`, `RESULT: exclusive lease granted to TWO agents (server race)`. In an early demo run both Arbiters posted verdicts and both created the same-named conflict room — Switch allows duplicate room names. Mitigation kept in this repo (without hiding the server behaviour): `Arbiter._claim_lease()` re-reads `held_by` after assuming, keeps only the alphabetically first holder, makes the other `release_role()` (no arguments; releases only the caller's lease), and repeats the check before acting on every candidate; `_open_conflict` looks the room name up with `list_all_rooms` and reuses it; `demo` starts `arbiter-b` only after the primary's lease is confirmed. Failover still works after the 6 s heartbeat TTL. This is worth reporting upstream.
 
 Four more findings that cost us time and will save yours:
 
-1. **A `scope=all&filter=all` stream opens with `rooms=[]`.** Creating or joining a room does not cover it. Each `connect_to_room` emits one `subscription_changed` with `reason="subscription updated"`; claim every room you need, and re-claim on `room_join` or an unknown `room_id` in a message. `start_from=head` with a new connection id does not replay old messages, so idempotency is yours to implement (`processed_messages`, `pairs_seen`). (`docs/SWITCH_NOTES.md`, M1/M4; `src/splitbrain/agents/coverage.py`.)
-2. **Heartbeats define liveness, not the socket.** `POST /agents/{id}/connection/beat {"connection_id", "cursor"}` every 2 s, TTL 6 s; a 404/409 means reopen the stream with the *same* connection id, not exponential backoff. A beat before `connection_state` is refused. An op with `X-Switch-Connection-Id` for a connection with no open stream is refused with 409, so `create_room_from_yaml` needs a live stream while room-agnostic ops (`read_context`, `get_room_detail`, `list_all_rooms`) work with the header omitted. (`M0/M2/M5`; `src/splitbrain/switch/client.py`.)
-3. **The published 0.31.0 operation registry differs from the source tree.** `GET /agents/{id}/ops` is authoritative: `list_all_rooms` takes only `include_archived` and returns a *bare list* (not `{"rooms": ..., "next_cursor": ...}`); `list_rooms` uses `room_id`, not `id`; `create_room` returns no `caller_is_member`. Read the live registry before adding an argument to any op. (`M2/M5`; `docs/SWITCH_NOTES.md`.)
-4. **Gateway defaults are loud.** New agents are owner-only and the default bridge posts a "Hey! Ping @agent…" greeting in every room an agent joins. Turn greetings off and open the addressing policy *before* creating rooms, or demo users cannot address agents and the "silent by default" rule is broken by Switch itself. Also: `link_rooms` does **not** require membership in the target room, but `connect_to_room` does — and needs a live session even for reads. (`M2/M5/M6`; `src/splitbrain/bootstrap.py`.)
+1. **A `scope=all&filter=all` stream opens with `rooms=[]`.** Creating or joining a room does not cover it. Each `connect_to_room` emits one `subscription_changed` with `reason="subscription updated"`; claim every room you need, and re-claim on `room_join` or an unknown `room_id` in a message. `start_from=head` with a new connection id does not replay old messages, so idempotency is yours to implement (`processed_messages`, `pairs_seen`). (lab notebook: `docs/SWITCH_NOTES.md`; code: `src/splitbrain/agents/coverage.py`.)
+2. **Heartbeats define liveness, not the socket.** `POST /agents/{id}/connection/beat {"connection_id", "cursor"}` every 2 s, TTL 6 s; a 404/409 means reopen the stream with the *same* connection id, not exponential backoff. A beat before `connection_state` is refused. An op with `X-Switch-Connection-Id` for a connection with no open stream is refused with 409, so `create_room_from_yaml` needs a live stream while room-agnostic ops (`read_context`, `get_room_detail`, `list_all_rooms`) work with the header omitted. (lab notebook: `docs/SWITCH_NOTES.md`; code: `src/splitbrain/switch/client.py`.)
+3. **The published 0.31.0 operation registry differs from the source tree.** `GET /agents/{id}/ops` is authoritative: `list_all_rooms` takes only `include_archived` and returns a *bare list* (not `{"rooms": ..., "next_cursor": ...}`); `list_rooms` uses `room_id`, not `id`; `create_room` returns no `caller_is_member`. Read the live registry before adding an argument to any op (lab notebook: `docs/SWITCH_NOTES.md`).
+4. **Gateway defaults are loud.** New agents are owner-only and the default bridge posts a "Hey! Ping @agent…" greeting in every room an agent joins. Turn greetings off and open the addressing policy *before* creating rooms, or demo users cannot address agents and the "silent by default" rule is broken by Switch itself. Also: `link_rooms` does **not** require membership in the target room, but `connect_to_room` does — and needs a live session even for reads. (lab notebook: `docs/SWITCH_NOTES.md`; code: `src/splitbrain/bootstrap.py`.)
 
 ## Known limits
 
@@ -161,7 +162,7 @@ Honest scope of the demo:
 ## Built with
 
 - **Switch 0.31.0** (SandboxAQ) — rooms, roles, references, documents, targeted messages, Gateway and the bridges. Pinned in `deploy/.env.example` and `src/splitbrain/config.py`.
-- **WorkBuddy + Tencent Hy4** wrote the code. **Claude** wrote the specs, orchestrated the milestones, reviewed every one and ran the acceptance checks.
+- **WorkBuddy + Tencent Hy4** wrote the code. **Claude** wrote the specs, reviewed the implementation and ran the verification checks.
 - **Fictional data.** Acme, María, Tomás, Lucía, Pablo, Fabrizio and the "Acme roadmap" issues in `https://github.com/fabriutola-hub/splitbrain-demo-roadmap` were invented for this hackathon. The hackathon quotes are paraphrases of two public announcement pages.
 - **Apache-2.0** — see `LICENSE`. Python 3.12+, `uv`, `httpx`, `pydantic`, `rich`, `rapidfuzz` (`pyproject.toml`, `uv.lock`).
 
@@ -170,7 +171,7 @@ Honest scope of the demo:
 ```
 AGENTS.md  CODEBUDDY.md  README.md  LICENSE  Makefile  pyproject.toml  uv.lock
 deploy/            .env.example (pinned, POSTGRES_HOST_PORT=55432), docker-compose.yml (upstream standalone)
-docs/              SPEC.md  SWITCH_NOTES.md  TASKS.md  BLOG_DRAFT.md  assets/ (banner, agent emblems, lockups, blog cover)
+docs/              SPEC.md  SWITCH_NOTES.md (lab notebook)  TASKS.md  BLOG_DRAFT.md  assets/ (banner, emblems, lockups, blog cover)
 src/splitbrain/
   cli.py  config.py  stack.py  bootstrap.py  demo.py  seed.py  evaluation.py  recording.py  tui.py
   switch/            sse.py  events.py  client.py  gateway.py  mattermost.py
@@ -188,4 +189,12 @@ scripts/             probe_arbiter_lease.py  record_github_fixture.py
 tests/               unit tests; integration tests marked `integration` (need the stack)
 ```
 
-Checks used for this milestone: `uv run ruff check .`, `uv run pytest -m "not integration" -q`. Integration tests need `uv run splitbrain up`; see `AGENTS.md`.
+## Development
+
+```bash
+uv run ruff check .
+uv run pytest -m "not integration" -q
+uv run splitbrain up && uv run pytest -m integration -q   # needs the running Switch stack, ~30 s
+```
+
+The integration tests need the local Switch stack and take about 30 s.
