@@ -8,7 +8,9 @@ Sales promises Acme that SSO will be live on December 1, in a public channel. En
 
 <!-- GIF: docs/assets/demo.gif (recorded by Fabrizio) -->
 
-*The moment a conflict room such as `conflict-sb-8510-sso` is created with María and Tomás in it, both quotes, the GitHub evidence and an open decision record.*
+![Private conflict room in Mattermost](docs/assets/screens/conflict-room.png)
+
+*The private conflict room `conflict-sb-1847-sso`: the Arbiter's brief with both quotes and the GitHub evidence, María's `decision: …` proposal, Tomás's `Confirmed, thanks!`, the recorded decision and `Corrections posted in #sales, #engineering.`*
 
 ## Quick start
 
@@ -48,6 +50,17 @@ uv run splitbrain seed near-misses   # 0 candidates, 0 new conflict rooms
 
 It deliberately follows the SSO scenario: Pablo's "Correction to my earlier note…" and the other near-misses must not produce a second alert. Seeding the *same* scenario twice against the same stack is refused; different scenarios are allowed.
 
+## What it looks like
+
+| Consent in a private channel | Correction in the original thread |
+| --- | --- |
+| ![Consent question in #engineering](docs/assets/screens/consent.png) | ![Correction reply in #sales](docs/assets/screens/correction.png) |
+| The Sentinel asks Tomás for consent in his own thread in `#engineering` (private) before his quote is shown anywhere else. | After both authors agree, the Sentinel posts the recorded decision back in María's original `#sales` thread (and Tomás's `#engineering` thread). |
+
+![Sentinel TUI](docs/assets/screens/sentinel-tui.svg)
+
+*The Sentinel's live terminal view (`uv run splitbrain run sentinel --tui`): team messages on the left, the linked contradiction and full SSO lifecycle on the right.*
+
 ## How Splitbrain uses Switch
 
 Switch is not a notification channel bolted on at the end: rooms, roles, references, documents, links, targeted messages and the event stream *are* the application's transport and state. There is no shared database or socket between the three agent processes.
@@ -65,7 +78,7 @@ Switch is not a notification channel bolted on at the end: rooms, roles, referen
 | GitHub reference attached to a room | `src/splitbrain/bootstrap.py`, `src/splitbrain/agents/verifier.py`, `src/splitbrain/evidence/github.py`, `seed/github_fixture.json` | `create_reference(type="github", value={"urls": [...]})` + `attach_reference_to_room` put the roadmap repo on `splitbrain-ops`. The Verifier reads the URL from `connect_to_room(ops).references`, never from chat text, and checks issue milestones and their timeline (`Q4 2026 → Q1 2027`). |
 | `create_room_from_yaml` group template | `templates/splitbrain.template.yaml`, `templates/hackathon.template.yaml`, `src/splitbrain/bootstrap.py` | One call creates the `Acme` group: five rooms (one private), the exclusive `arbiter` and shared `verifier` roles with their instructions, the "How Splitbrain works" document and all four `watches` links. Bootstrap is idempotent; the second template adds the two hackathon rooms. |
 | Gateway: greetings off, addressing policy open; Mattermost profile images | `src/splitbrain/switch/gateway.py`, `src/splitbrain/switch/mattermost.py`, `src/splitbrain/bootstrap.py` | A new agent is owner-only and the bridge posts "Hey! Ping @agent…" in every room it joins. `set_greetings(bridge_id, False)` keeps the agents silent; `open_addressing(agent_id)` lets unclaimed Mattermost users address them. Bootstrap also uploads `docs/assets/agent-*.jpg` as the agents' avatars through the Mattermost API, idempotently. Splitbrain still enforces "only the two authors decide" itself. |
-| Mattermost bridge (and Slack / Discord / Teams) | `src/splitbrain/switch/mattermost.py`, `src/splitbrain/seed.py`, `deploy/docker-compose.yml` | Agents only ever talk to Switch; the Switch bridge maps rooms to chat channels. That is why the same flow works on any chat app the Gateway bridges — the bridging is Switch's job, not Splitbrain's. **Only** the demo seeding script uses the Mattermost REST API, to post as people. We ran the stack against Mattermost only; chat output is deliberately table-free plain text because Slack does not render Markdown tables. |
+| Mattermost bridge (and Slack / Discord / Teams) | `src/splitbrain/switch/mattermost.py`, `src/splitbrain/bootstrap.py`, `src/splitbrain/seed.py`, `deploy/docker-compose.yml` | Agents never call Mattermost; only the demo tooling does (`seed` posts as the people; `bootstrap` creates the demo users and uploads the agent avatars). Agents only ever talk to Switch, and the Switch bridge maps rooms to chat channels — that is why the same flow works on any chat app the Gateway bridges. We ran the stack against Mattermost only; chat output is deliberately table-free plain text because Slack does not render Markdown tables. |
 
 People join rooms through `users:` in the template and `user_names` in `create_room`; `add_users_to_room` was verified but is not needed.
 
@@ -165,6 +178,7 @@ Four more findings that cost us time and will save yours:
 Honest scope of the demo:
 
 - **Replay mode is recorded data.** With no `SPLITBRAIN_LLM_API_KEY`, `demo` and `eval` replay cassettes recorded with `deepseek-ai/DeepSeek-V4.1-Flash-1017` via River AI (`https://api.river.ai/v1`, `eval/results.md`). A live run defaults to `tencent/hy4` on `https://openrouter.ai/api/v1` (`src/splitbrain/config.py`); any OpenAI-compatible endpoint works through `SPLITBRAIN_LLM_BASE_URL` / `SPLITBRAIN_LLM_MODEL` / `SPLITBRAIN_LLM_API_KEY`. An input without a cassette raises `ReplayMiss`.
+- **Live extraction can vary across runs.** With a live model, extracted fields are not guaranteed to be identical on every call. In our tests, `refunds` sometimes came back with `subject_key="approval-threshold"` instead of `"refunds"`, so the matcher did not form the pair. Replay mode is deterministic, which is why `demo` and `eval` use it by default.
 - **Fixture evidence.** `--offline` uses `seed/github_fixture.json`, recorded from the public demo repo with `scripts/record_github_fixture.py`, instead of live GitHub REST. A live network failure raises `SplitbrainEvidenceError`; it never falls back silently.
 - **Scenario evidence is a hackathon fixture.** The two public announcement pages have no GitHub issue; `seed/scenario_evidence.json` holds explicitly labelled paraphrases, enabled only by `SPLITBRAIN_SCENARIO_EVIDENCE=hackathon`, with `scenario-fixture:` identifiers instead of invented URLs and a `[DEGRADED]` banner.
 - **The demo runs on a local Mattermost** brought up by the `collab` compose profile on one machine. We did not run Slack/Discord/Teams bridges; the bridge is Switch's, but that path is unverified here.
@@ -184,7 +198,7 @@ Honest scope of the demo:
 ## Built with
 
 - **Switch 0.31.0** (SandboxAQ) — rooms, roles, references, documents, targeted messages, Gateway and the bridges. Pinned in `deploy/.env.example` and `src/splitbrain/config.py`.
-- **WorkBuddy + Tencent Hy4** wrote the code and this README.
+- **WorkBuddy + Tencent Hy4** wrote the code and this README; **Gemini 4 Argon** (Antigravity) finished the last polish round. **Claude** (Anthropic) orchestrated the build: it wrote the specifications, reviewed every change and ran the end-to-end verification.
 - **Fictional data.** Acme, María, Tomás, Lucía, Pablo, Fabrizio and the "Acme roadmap" issues in `https://github.com/fabriutola-hub/splitbrain-demo-roadmap` were invented for this hackathon. The hackathon quotes are paraphrases of two public announcement pages.
 - **Apache-2.0** — see `LICENSE`. Python 3.12+, `uv`, `httpx`, `pydantic`, `rich`, `rapidfuzz` (`pyproject.toml`, `uv.lock`).
 
@@ -193,7 +207,7 @@ Honest scope of the demo:
 ```
 README.md  LICENSE  Makefile  pyproject.toml  uv.lock
 deploy/            .env.example (pinned, POSTGRES_HOST_PORT=55432), docker-compose.yml (upstream standalone)
-docs/              assets/ (banner, emblems, lockups, blog cover)
+docs/              assets/ (banner, emblems, lockups, blog cover, screens/)
 src/splitbrain/
   cli.py  config.py  stack.py  bootstrap.py  demo.py  seed.py  evaluation.py  recording.py  tui.py
   switch/            sse.py  events.py  client.py  gateway.py  mattermost.py
@@ -207,7 +221,7 @@ templates/           splitbrain.template.yaml  hackathon.template.yaml
 seed/                scenarios/{sso,refunds,hackathon,near-misses}.yaml  github_fixture.json  scenario_evidence.json
 cassettes/           extract/  classify/  (committed record/replay responses)
 eval/                dataset.jsonl  results.md
-scripts/             probe_arbiter_lease.py  record_github_fixture.py
+scripts/             probe_arbiter_lease.py  record_github_fixture.py  render_tui_svg.py
 tests/               unit tests; integration tests marked `integration`; tui_snapshot_120x32.txt
 ```
 
