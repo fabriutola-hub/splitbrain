@@ -1,4 +1,4 @@
-"""M6 Sentinel: consent in the author's thread, corrections in the origin threads."""
+"""Sentinel: consent in the author's thread, corrections in the origin threads."""
 
 from __future__ import annotations
 

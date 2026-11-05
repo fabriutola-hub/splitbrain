@@ -1,7 +1,7 @@
 """Prompts for claim extraction and pair classification.
 
 Chat text is always wrapped in <message> data blocks and explicitly declared to be
-data, never instructions (SPEC section 3, rule 5). Field definitions and worked
+data, never instructions. Field definitions and worked
 examples are mandatory here: River AI inverted subject/scope with a vague prompt.
 """
 

@@ -1,4 +1,4 @@
-"""M7: every demo scenario replays offline from committed cassettes, no API key.
+"""Every demo scenario replays offline from committed cassettes, no API key.
 
 Feeds each scenario through the real Sentinel pipeline (same Extractor,
 Classifier, matcher and threshold as `splitbrain eval`) using only cassettes.

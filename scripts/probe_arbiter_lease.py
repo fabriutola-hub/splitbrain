@@ -1,14 +1,21 @@
-"""Reproducible probe for the Switch 0.31.0 exclusive-role lease race (M7).
+"""Reproduce the Switch 0.31.0 exclusive-role lease race.
 
-Run against a bootstrapped stack:
+Run against a bootstrapped stack with no Arbiter process running:
 
+    uv run splitbrain up && uv run splitbrain bootstrap
     uv run python scripts/probe_arbiter_lease.py
 
-Two live agent streams call `assume_role("arbiter")` concurrently. The script
-prints the exact result of each call, `get_room_detail(ops).roles[arbiter].held_by`
-before/after, and what `release_role()` by the loser does. It leaves the role
-unheld so the next demo/bootstrap run starts clean. Results are recorded in
-docs/SWITCH_NOTES.md under "Verified in M7".
+Two live agent streams call `assume_role("arbiter")` at the same instant. The
+script prints the exact result of each call and
+`get_room_detail(ops).roles[arbiter].held_by` before and after, then shows what
+`release_role()` by the loser does. Switch 0.31.0 can grant this exclusive lease
+to BOTH callers under the race: both calls return HTTP 200 and `held_by` lists
+two agents, even though a non-racing second call is refused with HTTP 400. That
+is the behaviour `Arbiter._claim_lease` works around by re-reading `held_by` and
+keeping only the alphabetically first holder before acting on every candidate.
+
+The script releases every lease it takes, so the role is unheld when it exits
+and the next demo starts clean. No rooms, documents or roles are deleted.
 """
 
 from __future__ import annotations

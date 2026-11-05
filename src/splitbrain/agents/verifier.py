@@ -1,4 +1,4 @@
-"""M5 Verifier: answer `sb:evidence_request` from the ops room's GitHub reference.
+"""Verifier: answer `sb:evidence_request` from the ops room's GitHub reference.
 
 It holds the (non-exclusive) `verifier` role, reads the repository URL from the
 reference attached to `splitbrain-ops`, and posts `sb:evidence` back in the
@@ -18,13 +18,14 @@ from ..core.models import Evidence
 from ..core.packets import encode
 from ..core.protocol import EvidenceRequestPacket, read_packet
 from ..evidence.github import (
+    FIXTURE_BANNER,
     EvidenceSettings,
     GitHubEvidence,
     GitHubSnapshot,
     SplitbrainEvidenceError,
     build_evidence,
 )
-from ..evidence.scenario import ScenarioEvidence, load_scenario_evidence
+from ..evidence.scenario import ENV_VAR, ScenarioEvidence, load_scenario_evidence
 from ..switch.client import SwitchAgent
 from ..switch.events import (
     ConnectionStateFrame,
@@ -46,6 +47,20 @@ logger = logging.getLogger(__name__)
 AGENT_NAME = "splitbrain-verifier"
 VERIFIER_ROLE = "verifier"
 ARBITER_NAMES = frozenset({"splitbrain-arbiter", "splitbrain-arbiter-b"})
+
+
+def evidence_mode_line(
+    settings: EvidenceSettings, scenario: ScenarioEvidence | None, repo: str | None = None
+) -> str:
+    """One honest line: the first line must already name an active fixture."""
+    if scenario is not None:
+        return (
+            f"{scenario.banner()} | Evidence mode: scenario fixture "
+            f"({ENV_VAR}={scenario.name}); GitHub evidence is not used for this candidate"
+        )
+    if settings.mode == "fixture":
+        return f"{FIXTURE_BANNER} | Evidence mode: fixture (recorded GitHub data)"
+    return f"Evidence mode: live (GitHub REST, {repo or 'repo pending'})"
 
 
 class Verifier:
@@ -115,7 +130,7 @@ class Verifier:
         if self.provider is not None:
             await self.provider.aclose()
         self.provider = GitHubEvidence(self.evidence_settings, self.repo_url)
-        print(self.evidence_settings.banner(self.repo_url), flush=True)
+        print(evidence_mode_line(self.evidence_settings, self.scenario, self.repo_url), flush=True)
         logger.info("GitHub evidence repository: %s", self.repo_url)
 
     async def _assume_role(self) -> None:
@@ -224,8 +239,7 @@ def build_runtime(
         name,
         [
             f"Role: {VERIFIER_ROLE} in {OPS_ROOM} (non-exclusive)",
-            f"Evidence mode: {evidence_settings.mode} (SPLITBRAIN_EVIDENCE_MODE)",
-            *([scenario.banner()] if scenario is not None else []),
+            evidence_mode_line(evidence_settings, scenario),
             "Silent by default: this agent never posts in team rooms.",
         ],
     )

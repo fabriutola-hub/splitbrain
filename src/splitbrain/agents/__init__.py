@@ -1,1 +1,1 @@
-"""Splitbrain Switch agents. M4 ships the Sentinel; M5 adds the rest."""
+"""Splitbrain Switch agents: Sentinel, Arbiter, standby Arbiter and Verifier."""

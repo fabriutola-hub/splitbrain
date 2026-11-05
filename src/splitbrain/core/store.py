@@ -1,4 +1,4 @@
-"""SQLite persistence for the Sentinel (SPEC section 4.3).
+"""SQLite persistence for the Sentinel.
 
 Plain sqlite3 from the standard library. Sync statements run in a worker thread so
 the agent's event loop never blocks on disk.

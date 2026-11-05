@@ -1,4 +1,4 @@
-"""M5 wire contract: tolerant candidate packets, strict sender/layout checks."""
+"""Wire contract: tolerant candidate packets, strict sender/layout checks."""
 
 from __future__ import annotations
 

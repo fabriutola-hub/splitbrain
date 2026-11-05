@@ -1,4 +1,4 @@
-# Splitbrain M3 — brain evaluation
+# Splitbrain — brain evaluation
 
 - Run (UTC): 2026-11-04T13:45:22+00:00
 - LLM mode: `replay`
@@ -6,7 +6,7 @@
 - Base URL: `https://api.river.ai/v1`
 - Cassette model: `deepseek-ai/DeepSeek-V4.1-Flash-1017`
 - Dataset: `eval/dataset.jsonl` — 44 pairs (contradiction=18, update=4, compatible=8, unrelated=14)
-- Cassettes: extract=94, classify=35
+- Cassettes: extract=95, classify=35
 - Pipeline: prefilter -> extraction -> matching -> classification -> candidate (threshold 0.7), identical to the Sentinel.
 
 ## Metrics for `contradiction`

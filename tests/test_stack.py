@@ -1,4 +1,4 @@
-"""M0 tests: stack orchestration without touching real Docker containers."""
+"""Stack orchestration without touching real Docker containers."""
 
 from __future__ import annotations
 

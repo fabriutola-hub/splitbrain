@@ -1,4 +1,4 @@
-"""Model-free candidate pairing (SPEC section 4.4 step 3)."""
+"""Model-free candidate pairing by subject, scope and polarity."""
 
 from __future__ import annotations
 

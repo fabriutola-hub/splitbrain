@@ -1,4 +1,4 @@
-"""SPEC 4.4 step 3: model-free matching rules."""
+"""Model-free matching rules."""
 
 from __future__ import annotations
 

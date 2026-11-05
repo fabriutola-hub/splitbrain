@@ -1,4 +1,4 @@
-"""M5 Verifier: the evidence reply is readable and ends with one packet line."""
+"""Verifier: the evidence reply is readable and ends with one packet line."""
 
 from __future__ import annotations
 

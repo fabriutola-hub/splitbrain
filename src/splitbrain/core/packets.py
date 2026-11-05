@@ -1,4 +1,4 @@
-"""Strict encode/decode of the `sb:<kind> {json}` packet line (SPEC section 4.2)."""
+"""Strict encode/decode of the `sb:<kind> {json}` packet line."""
 
 from __future__ import annotations
 
@@ -21,7 +21,7 @@ PACKET_KINDS = frozenset(
         "consent",
         "decided",
         "corrected",
-        # M5 fallback: the Arbiter may ask the Sentinel (member of every origin
+        # Fallback: the Arbiter may ask the Sentinel (member of every origin
         # room) to create the room links if Switch refuses its own link_rooms.
         "link_request",
         "linked",

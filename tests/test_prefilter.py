@@ -1,4 +1,4 @@
-"""SPEC 4.4 step 1: signal-based prefilter, at least 20 examples."""
+"""Signal-based prefilter, at least 20 examples."""
 
 from __future__ import annotations
 

@@ -1,4 +1,4 @@
-"""Pydantic payloads for the detection pipeline (SPEC section 4.3)."""
+"""Pydantic payloads for the detection pipeline."""
 
 from __future__ import annotations
 

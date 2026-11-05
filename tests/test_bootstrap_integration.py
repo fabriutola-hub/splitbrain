@@ -1,4 +1,4 @@
-"""M2 integration: bootstrap the live stack and verify the result through APIs."""
+"""Bootstrap integration: verify the live stack through the public APIs."""
 
 from __future__ import annotations
 

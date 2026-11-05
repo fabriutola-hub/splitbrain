@@ -1,6 +1,6 @@
 """`splitbrain eval`: run the detection pipeline over the labeled dataset.
 
-This is the exact path the M4 Sentinel uses (Brain.analyze_pair), so the numbers
+This is the exact path the Sentinel uses (Brain.analyze_pair), so the numbers
 below describe what the agent will do in a live room.
 """
 
@@ -172,7 +172,7 @@ def render_markdown(
 ) -> str:
     label_counts = ", ".join(f"{label}={metrics['labels'].get(label, 0)}" for label in LABELS)
     lines = [
-        "# Splitbrain M3 — brain evaluation",
+        "# Splitbrain — brain evaluation",
         "",
         f"- Run (UTC): {datetime.now(UTC).isoformat(timespec='seconds')}",
         f"- LLM mode: `{settings.mode}`",

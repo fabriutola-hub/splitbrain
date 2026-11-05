@@ -1,6 +1,6 @@
 """The shared detection path: prefilter -> extract -> match -> classify -> candidate.
 
-`splitbrain eval` and the M4 Sentinel both call `Brain.analyze_pair`, so the
+`splitbrain eval` and the Sentinel both call `Brain.analyze_pair`, so the
 numbers in eval/results.md describe exactly what the agent will do.
 """
 

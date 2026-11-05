@@ -1,4 +1,4 @@
-"""Cheap, model-free prefilter for incoming chat messages (SPEC section 4.4 step 1)."""
+"""Cheap, model-free prefilter for incoming chat messages."""
 
 from __future__ import annotations
 

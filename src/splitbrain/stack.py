@@ -178,7 +178,7 @@ async def _server_version(
 
     # 0.31.0's /health is deliberately just {"status": "ok"}; /version needs an
     # agent token and /gateway/version a session. The login response carries the
-    # server's own declaration, so that is where M0 reads the real version.
+    # server's own declaration, so that is where the code reads the real version.
     response = await client.post(
         f"{settings.api_base_url}/gateway/auth/login",
         json={

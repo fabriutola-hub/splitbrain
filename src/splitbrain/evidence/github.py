@@ -247,7 +247,7 @@ class GitHubEvidence:
                 or item.get("state") != "open"
             ):
                 continue
-            # Search results can include closed issues; SPEC 4.5 says ignore them.
+            # Search results can include closed issues; ignore them.
             timeline = await self._timeline(int(item["number"]))
             issues.append(self._issue(item, timeline))
         return GitHubSnapshot(
@@ -335,7 +335,7 @@ def build_evidence(
     *,
     source: Literal["github", "fixture"],
 ) -> Evidence:
-    """Turn the provider's output into the SPEC 4.3 Evidence packet."""
+    """Turn the provider's output into an Evidence packet."""
     open_issues = [issue for issue in snapshot.issues if issue.state == "open"]
     items = [
         EvidenceItem(

@@ -1,4 +1,4 @@
-"""M1 integration: the real Switch stack (docker compose project `splitbrain`).
+"""Protocol integration: the real Switch stack (compose project `splitbrain`).
 
 Everything created here is temporary and prefixed `it-`. Reserved demo names
 (splitbrain-*, maria, tomas, lucia, pablo, fabrizio) are never touched.
@@ -60,8 +60,8 @@ async def test_switch_unaddressed_message_and_threaded_reply() -> None:
     username = f"it-user-{suffix}"
     room_name = f"it-room-{suffix}"
     password = secrets.token_hex(12)
-    body = f"M1 probe {suffix}: SSO goes live on December 1."
-    reply_body = f"M1 threaded reply {suffix}"
+    body = f"probe {suffix}: SSO goes live on December 1."
+    reply_body = f"threaded reply {suffix}"
 
     admin = MattermostAdmin(
         settings.mattermost_url,
@@ -85,7 +85,7 @@ async def test_switch_unaddressed_message_and_threaded_reply() -> None:
             settings.api_base_url,
             settings.values["AGENT_REGISTRATION_TOKEN"],
             agent_name,
-            "M1 integration probe",
+            "protocol integration probe",
         )
         await gateway.login()
         bridges = await gateway.bridges()
@@ -116,7 +116,7 @@ async def test_switch_unaddressed_message_and_threaded_reply() -> None:
         room = await agent.op(
             "create_room",
             name=room_name,
-            description="M1 integration probe",
+            description="protocol integration probe",
             agent_names=[agent_name],
             user_names=[username],
             channel_type="channel_public",

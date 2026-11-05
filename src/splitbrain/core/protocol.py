@@ -1,4 +1,4 @@
-"""Validated payloads for the inter-agent packets used from M5 on (SPEC 4.2, 4.5-4.7).
+"""Validated payloads for the inter-agent packets.
 
 A `sb:candidate` carries a `text: null, text_withheld: true` claim for a quote
 from a private room, so it cannot be validated as a `Candidate` from models.py

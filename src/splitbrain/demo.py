@@ -1,4 +1,4 @@
-"""M7: `splitbrain demo` and `run all` — one command, clean state, honest banners.
+"""`splitbrain demo` and `run all` — one command, clean state, honest banners.
 
 The parent owns the Docker stack, bootstrap, four child agent processes and the
 seed script. Children are started in their own process group so Ctrl+C reaches

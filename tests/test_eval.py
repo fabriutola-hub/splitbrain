@@ -1,4 +1,4 @@
-"""Dataset contract (SPEC 4.11) and metric / report computation."""
+"""Dataset contract and metric / report computation."""
 
 from __future__ import annotations
 

@@ -1,4 +1,4 @@
-"""M5 evidence: live/fixture modes, milestone moves, fail-loud network errors."""
+"""Evidence: live/fixture modes, milestone moves, fail-loud network errors."""
 
 from __future__ import annotations
 

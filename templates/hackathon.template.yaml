@@ -1,4 +1,4 @@
-# Closing beat of the video, version-1 group document (SPEC 4.1 / 4.10).
+# Closing beat of the video, version-1 group document.
 # Bootstrap runs this once, after the Acme group; it is idempotent: on later
 # runs the two rooms are found by name and nothing is created.
 # The two "page" users stand for the two PUBLIC announcement pages of the

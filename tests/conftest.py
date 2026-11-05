@@ -1,4 +1,4 @@
-"""Shared fakes: no test in M3 is allowed to touch the network."""
+"""Shared fakes: no unit test is allowed to touch the network."""
 
 from __future__ import annotations
 

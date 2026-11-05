@@ -1,4 +1,4 @@
-"""M0 tests: generating deploy/.env from the committed example."""
+"""Generating deploy/.env from the committed example."""
 
 from __future__ import annotations
 

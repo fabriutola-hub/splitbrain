@@ -1,4 +1,4 @@
-"""SPEC 4.2: strict packet encode/decode."""
+"""Strict packet encode/decode."""
 
 from __future__ import annotations
 

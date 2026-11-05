@@ -1,7 +1,7 @@
 """Room discovery and claiming for agents that are not members of every room.
 
 A `scope=all&filter=all` stream starts with an empty covered set: a room is
-only covered after `connect_to_room` claims it (SWITCH_NOTES, M1/M4). The
+only covered after `connect_to_room` claims it. The
 Sentinel already does this itself; the Arbiter and Verifier share this helper.
 """
 
