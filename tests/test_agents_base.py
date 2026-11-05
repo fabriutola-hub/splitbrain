@@ -1,4 +1,4 @@
-"""M4 shared runtime: the stream handler only enqueues; a worker does the work."""
+"""Shared runtime: the stream handler only enqueues; a worker does the work."""
 
 from __future__ import annotations
 
@@ -168,6 +168,8 @@ def test_tui_log_handler_does_not_write_to_stdout() -> None:
 
     view = SentinelTui()
     handler = view.log_handler()
-    record = logging.LogRecord("x", logging.INFO, "f.py", 1, "hello %s", ("world",), None)
+    record = logging.LogRecord(
+        "x", logging.INFO, "f.py", 1, "Extracted 1 claim(s) from #sales", (), None
+    )
     handler.handle(record)
-    assert "hello world" in " ".join(view.logs)
+    assert "Extracted 1 claim(s) from #sales" in " ".join(view.logs)

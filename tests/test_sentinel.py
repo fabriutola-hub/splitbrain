@@ -1,4 +1,4 @@
-"""M4 Sentinel: the M3 pipeline, silence, packets and idempotency (no network)."""
+"""Sentinel: detection pipeline, silence, packets and idempotency (no network)."""
 
 from __future__ import annotations
 
@@ -191,7 +191,7 @@ async def test_candidate_is_sent_only_to_ops_with_a_packet_last_line(
         assert kind == "candidate" and data["id"].startswith("sb-")
         assert data["claim_a"]["room_name"] == "sales"
         assert data["claim_b"]["room_name"] == "engineering"
-        # SPEC 3.3: the private-room quote never reaches splitbrain-ops.
+        # A private-room quote never reaches splitbrain-ops.
         assert pair[1].text not in call["body"]
         assert "quote withheld until the author consents" in call["body"]
         assert data["claim_b"]["text"] is None
@@ -278,7 +278,8 @@ async def test_ignored_sources_never_reach_the_extraction_queue(
             await sentinel.on_frame(item)
         assert sentinel.pending.empty()
         assert transport.calls == []
-        assert view.filtered == len(cases)
+        assert view.internal == 3  # agent, platform message and ops room
+        assert view.filtered == 1  # chatter in a team room
         assert agent.targeted_calls == []
     finally:
         await sentinel.aclose()

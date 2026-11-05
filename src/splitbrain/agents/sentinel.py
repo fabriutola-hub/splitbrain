@@ -1,9 +1,9 @@
-"""M4 Sentinel: watch every team room, detect contradictions, stay silent.
+"""Sentinel: watch every team room, detect contradictions, stay silent.
 
-The detection path is the exact M3 pipeline (`Brain`, i.e. what `splitbrain eval`
-runs): the same Extractor, Classifier, prefilter, matcher, threshold and SQLite
-store. Only the ingestion is new: frames arrive on a queue, extraction is
-batched, and the candidate is published to `splitbrain-ops`.
+The detection path is the same `Brain` pipeline that `splitbrain eval` runs:
+Extractor, Classifier, prefilter, matcher, threshold and SQLite store. Only the
+ingestion is new: frames arrive on a queue, extraction is batched, and the
+candidate is published to `splitbrain-ops`.
 """
 
 from __future__ import annotations
@@ -24,6 +24,7 @@ from ..core.models import (
     Claim,
     ClaimKind,
     ClaimStatus,
+    Evidence,
     Message,
     Relation,
     make_claim_id,
@@ -80,7 +81,7 @@ class ConsentPending:
 
 
 def ignored_source(message: Message) -> str | None:
-    """M4 rule 2: our agents, platform traffic and internal rooms are never data."""
+    """Our agents, platform traffic and internal rooms are never data."""
     author = message.author.strip().casefold()
     if author.startswith(OWN_AGENT_PREFIX):
         return "message from one of our own agents"
@@ -169,7 +170,7 @@ class Sentinel:
         elif isinstance(frame, MessageFrame):
             await self._on_message(frame)
 
-    # ── Room coverage (M4 rule 4) ────────────────────────────────────────────
+    # ── Room coverage ────────────────────────────────────────────
 
     async def _refresh_rooms(self) -> None:
         """Resolve room_id -> name for rooms created or joined after the stream."""
@@ -219,7 +220,7 @@ class Sentinel:
             await self._claim_room(room_id)
 
     async def _on_subscription(self, frame: SubscriptionChangedFrame) -> None:
-        logger.info("Rooms changed (%s): %d covered", frame.reason or "n/a", len(frame.rooms))
+        logger.debug("Rooms changed (%s): %d covered", frame.reason or "n/a", len(frame.rooms))
         if any(isinstance(rid, str) and rid not in self.rooms for rid in frame.rooms):
             await self._refresh_rooms()
         for room_id in frame.rooms:
@@ -241,14 +242,63 @@ class Sentinel:
 
     # ── Ingestion ────────────────────────────────────────────────────────────
 
+    def _note_internal(self) -> None:
+        if self.tui is not None:
+            self.tui.add_internal()
+
+    def _note_packet(self, kind: str, payload: Any) -> None:
+        """Turn ops packets into the lifecycle the viewer can follow."""
+        if self.tui is None:
+            return
+        candidate_id = getattr(payload, "candidate_id", None)
+        if not isinstance(candidate_id, str) or not candidate_id:
+            return
+        step = self.tui.add_step
+        if kind == "evidence" and isinstance(payload, Evidence):
+            detail = payload.detail or payload.summary
+            step(candidate_id, "evidence", f"evidence: {_one_line(detail, 120)}")
+        elif kind == "verdict":
+            step(
+                candidate_id,
+                "verdict",
+                f"verdict {str(getattr(payload, 'verdict', '')).upper()}",
+            )
+        elif kind == "consent_request":
+            step(
+                candidate_id,
+                "consent_asked",
+                f"consent asked @{getattr(payload, 'author', '?')}",
+            )
+        elif kind == "consent":
+            word = "granted" if getattr(payload, "granted", False) else "denied"
+            step(
+                candidate_id,
+                "consent_answer",
+                f"consent {word} @{getattr(payload, 'author', '?')}",
+            )
+        elif kind == "link_request":
+            name = self.rooms.get(getattr(payload, "conflict_room_id", ""), "")
+            if name.startswith("conflict-"):
+                step(candidate_id, "room", f"room #{name}")
+
     async def _on_message(self, frame: MessageFrame) -> None:
-        # M6: inter-agent packets and consent answers are control traffic, even
-        # when they arrive in a room the detection pipeline would otherwise read.
+        # Inter-agent packets are control traffic, never detection input.
         packet = read_packet(frame.payload.body, frame.payload.sender_name)
         if packet is not None:
+            self._note_internal()
+            self._note_packet(*packet)
             await self._handle_packet(frame, packet)
             return
         if await self._consent_reply(frame):
+            # A person's consent answer is still worth showing in the demo.
+            if self.tui is not None:
+                self.tui.add_message(
+                    self.rooms.get(frame.room_id, frame.room_id),
+                    frame.payload.sender_name,
+                    frame.payload.body,
+                    True,
+                    "consent answer",
+                )
             return
         payload = frame.payload
         room_id = frame.room_id
@@ -273,13 +323,17 @@ class Sentinel:
         )
 
         source = ignored_source(message)
+        if source is not None:
+            self._note_internal()
+            logger.debug("Ignored #%s %s: %s", room_name, message.author, source)
+            return
         decision = prefilter(message)
-        keep = source is None and decision.keep
-        reason = source or decision.reason
         if self.tui is not None:
-            self.tui.add_message(room_name, message.author, message.text, keep, reason)
-        if not keep:
-            logger.debug("Ignored #%s %s: %s", room_name, message.author, reason)
+            self.tui.add_message(
+                room_name, message.author, message.text, decision.keep, decision.reason
+            )
+        if not decision.keep:
+            logger.debug("Ignored #%s %s: %s", room_name, message.author, decision.reason)
             return
         if await self.store.is_processed(message.message_id):
             logger.info("Message %s already processed; skipping (idempotency)", message.message_id)
@@ -288,7 +342,7 @@ class Sentinel:
         logger.info("Queued #%s %s: %s", room_name, message.author, _short(message.text))
 
     async def _extraction_loop(self) -> None:
-        """SPEC 4.4 step 2: batch up to 8 messages or 2 s, then call the model."""
+        """Batch up to 8 messages or 2 s, then call the model."""
         loop = asyncio.get_running_loop()
         while not self.stop.is_set():
             try:
@@ -311,7 +365,7 @@ class Sentinel:
                 logger.exception("Extraction batch of %d message(s) failed", len(batch))
 
     async def analyze_messages(self, messages: list[Message]) -> None:
-        """The M3 pipeline, unchanged: prefilter, extract, match, classify, candidate."""
+        """The eval pipeline, unchanged: prefilter, extract, match, classify, candidate."""
         fresh: list[Message] = []
         for message in messages:
             if await self.store.is_processed(message.message_id):
@@ -373,7 +427,7 @@ class Sentinel:
             await self.store.mark_processed(message.message_id)
             self.messages_processed += 1
 
-    # ── M6: consent, corrections and the link fallback ──────────────────────
+    # ── Consent, corrections and the link fallback ──────────────────────
 
     async def _handle_packet(self, frame: MessageFrame, packet: tuple[str, Any]) -> None:
         kind, payload = packet
@@ -404,6 +458,12 @@ class Sentinel:
             f'room with @{other}? Reply "yes" or "no" here.'
         )
         await self.agent.post(room_id, question, thread_id=thread_root)
+        if self.tui is not None:
+            self.tui.add_step(
+                request.candidate_id,
+                "consent_asked",
+                f"consent asked @{request.author}",
+            )
         self.consent_pending[(room_id, thread_root)] = ConsentPending(
             candidate_id=request.candidate_id,
             claim_id=request.claim_id,
@@ -466,6 +526,12 @@ class Sentinel:
             target_roles=["arbiter"],
             thread_id=pending.ops_thread_id,
         )
+        if self.tui is not None:
+            self.tui.add_step(
+                pending.candidate_id,
+                "consent_answer",
+                f"consent {word} @{pending.author}",
+            )
         logger.info("Consent %s for %s by @%s", word, pending.candidate_id, pending.author)
         return True
 
@@ -473,6 +539,13 @@ class Sentinel:
         if decided.candidate_id in self.corrected:
             return
         self.corrected.add(decided.candidate_id)
+        if self.tui is not None:
+            self.tui.add_step(decided.candidate_id, "room", f"room #{decided.conflict_room_name}")
+            self.tui.add_step(
+                decided.candidate_id,
+                "decided",
+                f'DECIDED "{decided.decision.text}"',
+            )
         authors = " and ".join(f"@{name}" for name in decided.authors)
         topic = decided.subject
         if decided.scope and decided.scope != "*":
@@ -523,10 +596,20 @@ class Sentinel:
             target_roles=["arbiter"],
             thread_id=reply_thread(frame),
         )
+        if self.tui is not None:
+            self.tui.add_step(
+                decided.candidate_id,
+                "corrections",
+                f"corrections posted in {', '.join(rooms)}",
+            )
         logger.info("Corrections posted in %s for %s", ", ".join(rooms), decided.candidate_id)
 
     async def _answer_link_request(self, frame: MessageFrame, request: LinkRequestPacket) -> None:
         labels: list[str] = []
+        if self.tui is not None:
+            name = self.rooms.get(request.conflict_room_id, "")
+            if name.startswith("conflict-"):
+                self.tui.add_step(request.candidate_id, "room", f"room #{name}")
         for target in request.origins:
             await self.agent.op(
                 "link_rooms",
@@ -549,7 +632,7 @@ class Sentinel:
         )
         logger.info("Sentinel created %d link(s) for %s", len(labels), request.candidate_id)
 
-    # ── Publishing (M4 rule 3: silence by default) ──────────────────────────
+    # ── Publishing (silence by default) ──────────────────────────
 
     async def _publish(self, candidate: Candidate) -> None:
         payload = self._candidate_payload(candidate)
@@ -573,12 +656,17 @@ class Sentinel:
                     reason=candidate.reason,
                 )
             )
+            self.tui.add_step(
+                candidate.id,
+                "candidate",
+                f"candidate sent ({candidate.claim_a.subject} for {candidate.claim_a.scope})",
+            )
 
     @staticmethod
     def _candidate_payload(candidate: Candidate) -> dict[str, Any]:
-        """SPEC 3.3: a private-room quote never leaves the room, not even in ops.
+        """A private-room quote never leaves the room, not even in ops.
 
-        The stored Claim keeps its verbatim text (needed for corrections in M6);
+        The stored Claim keeps its verbatim text (needed for corrections);
         the outbound packet replaces it with a null text and a withheld flag.
         """
         data = candidate.model_dump(mode="json")
@@ -650,7 +738,7 @@ def build_runtime(
     tui_enabled: bool = False,
     stop: asyncio.Event | None = None,
 ) -> AgentRuntime:
-    """Wire the M3 brain and the M1 protocol client into one foreground agent."""
+    """Wire the detection pipeline and the protocol client into one agent."""
     state = bootstrap.load_state(settings)
     credentials = state.agents.get(AGENT_NAME)
     if credentials is None or not state.rooms:
