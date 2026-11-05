@@ -1,4 +1,4 @@
-"""M5 Arbiter: verdict rule, consent-aware quotes, brief and decision record."""
+"""Arbiter: verdict rule, consent-aware quotes, brief and decision record."""
 
 from __future__ import annotations
 
@@ -90,6 +90,11 @@ def test_verdict_rule(confidence: float, status: str, expected: str) -> None:
 def test_slug() -> None:
     assert mod._slug("SSO!") == "sso"
     assert mod._slug("") == "subject"
+    long = mod._slug("hackathon-prize-best-core-contribution")
+    assert len(long) <= mod.SLUG_LIMIT
+    assert long == "hackathon-prize-best-core"[: mod.SLUG_LIMIT].rsplit("-", 1)[0]
+    assert not long.endswith("-")
+    assert mod._slug("sso") == "sso"
 
 
 def test_quotes_are_withheld_until_the_author_consents() -> None:
@@ -110,6 +115,9 @@ def test_brief_cites_both_quotes_only_after_consent() -> None:
     brief = arbiter._brief(denied)
     assert "@maria @tomas" in brief
     assert "Confirmed with Acme" in brief
+    assert "sales, María Gómez (@maria)," in brief
+    assert "engineering (private), Tomás Rivera (@tomas)," in brief
+    assert "UTC" in brief
     assert "We're pulling SSO out of Q4" not in brief
     assert "(quote withheld at the author's request)" in brief
     assert "moved from Q4 2026 to Q1 2027 on Nov 4" in brief
@@ -123,6 +131,8 @@ def test_decision_record_is_open_and_contains_evidence_and_origins() -> None:
     record = arbiter._open_record(verification(granted=False))
     assert "Status: OPEN" in record
     assert "SB-0001 decision record" in record
+    assert "Claim A - #sales, María Gómez (@maria)," in record
+    assert "Tomás Rivera (@tomas)," in record
     assert "moved from Q4 2026 to Q1 2027 on Nov 4" in record
     assert "origin: #sales (maria)" in record
     assert "origin: #engineering (tomas)" in record
@@ -188,3 +198,102 @@ async def test_corrected_appends_the_final_line_and_confirms_in_the_room() -> No
     # A duplicate packet must not append the line twice.
     await arbiter._on_corrected(packet)
     assert item.record.count("Corrections posted") == 1
+
+
+async def test_conflict_room_is_private_and_invites_the_standby_arbiter() -> None:
+    from contextlib import asynccontextmanager
+
+    class FakeAgent:
+        def __init__(self) -> None:
+            self.calls: list[tuple[str, dict]] = []
+            self.posts: list[tuple[str, str]] = []
+
+        @asynccontextmanager
+        async def act_in(self, room_id: str):
+            yield self
+
+        async def op(self, name: str, /, **args) -> dict:
+            self.calls.append((name, args))
+            if name == "list_all_rooms":
+                return {"rooms": []}
+            if name == "create_room":
+                return {"id": "r-new"}
+            if name == "connect_to_room":
+                return {"linked_rooms": []}
+            if name == "create_room_document":
+                return {"document_id": "doc-1"}
+            return {}
+
+        async def post(self, room_id: str, body: str, **kwargs) -> dict:
+            self.posts.append((room_id, body))
+            return {}
+
+    arbiter = make_arbiter()
+    item = verification(granted=True)
+    item.evidence.status = "supports_b"
+    fake = FakeAgent()
+    arbiter.agent = fake  # type: ignore[assignment]
+    arbiter.is_holder = True
+    await arbiter._open_conflict(item)
+
+    create = next(args for name, args in fake.calls if name == "create_room")
+    assert create["channel_type"] == "channel_private"
+    assert create["agent_names"] == [
+        "splitbrain-arbiter",
+        "splitbrain-arbiter-b",
+        "splitbrain-sentinel",
+    ]
+    assert set(create["user_names"]) == {"maria", "tomas"}
+    assert "Private" in create["instructions"] or "private" in create["instructions"]
+    assert any(name == "link_rooms" for name, _ in fake.calls)
+    assert any("Splitbrain found two statements" in body for _, body in fake.posts)
+
+
+async def test_decision_message_shows_the_record_people_can_read() -> None:
+    from contextlib import asynccontextmanager
+
+    from splitbrain.core.decision import DecisionMachine, DecisionOutcome, DecisionState
+
+    class FakeAgent:
+        def __init__(self) -> None:
+            self.posts: list[tuple[str, str]] = []
+
+        @asynccontextmanager
+        async def act_in(self, room_id: str):
+            yield self
+
+        async def op(self, name: str, /, **args) -> dict:
+            return {}
+
+        async def post(self, room_id: str, body: str, **kwargs) -> dict:
+            self.posts.append((room_id, body))
+            return {}
+
+        async def targeted(self, room_id: str, body: str, **kwargs) -> dict:
+            return {}
+
+    arbiter = make_arbiter()
+    item = verification(granted=True)
+    item.room_id = "r-conflict"
+    item.room_name = "conflict-sb-0001-sso"
+    item.document_id = "doc-1"
+    item.record = "Status: OPEN"
+    item.machine = DecisionMachine("maria", "tomas")
+    fake = FakeAgent()
+    arbiter.agent = fake  # type: ignore[assignment]
+    outcome = DecisionOutcome(
+        state=DecisionState.DECIDED,
+        reply=None,
+        decision="SSO beta for Acme on December 15, GA in Q1.",
+        proposed_by="tomas",
+        confirmed_by="maria",
+        decided_at="2026-11-05T03:18:00+00:00",
+    )
+    await arbiter._on_decided(item, outcome)
+
+    message = fake.posts[-1][1]
+    assert 'Decision recorded: "SSO beta for Acme on December 15, GA in Q1."' in message
+    assert "(proposed by @tomas, confirmed by @maria," in message
+    assert "UTC" in message
+    assert message.endswith("Correcting the original threads now.")
+    assert "Decided at:" in item.record and "UTC" in item.record

@@ -1,4 +1,4 @@
-"""M5 Arbiter: the exclusive `arbiter` lease holder that convenes people.
+"""Arbiter: the exclusive `arbiter` lease holder that convenes people.
 
 Only the lease holder acts on `sb:candidate`; a standby Arbiter retries
 `assume_role` every 5 s and takes over when the holder's heartbeat lapses. The
@@ -37,7 +37,7 @@ from ..core.protocol import (
     VerdictPacket,
     read_packet,
 )
-from ..core.timefmt import stamp, zone_label
+from ..core.timefmt import stamp, stamp_iso, zone_label
 from ..switch.client import SwitchAgent, SwitchOpError
 from ..switch.events import (
     ConnectionStateFrame,
@@ -57,12 +57,14 @@ from .coverage import OPS_ROOM, RoomCoverage
 logger = logging.getLogger(__name__)
 
 AGENT_NAME = "splitbrain-arbiter"
+STANDBY_NAME = "splitbrain-arbiter-b"
 SENTINEL_NAME = "splitbrain-sentinel"
 ARBITER_ROLE = "arbiter"
 CONFIDENCE_THRESHOLD = 0.7
 ROLE_RETRY_S = 5.0
 TICK_S = 1.0
 LINK_TIMEOUT_S = 60.0
+SLUG_LIMIT = 24
 
 
 def _env_timeout(name: str, default: float) -> float:
@@ -76,12 +78,25 @@ def _env_timeout(name: str, default: float) -> float:
     return value
 
 
-def _slug(text: str) -> str:
-    return re.sub(r"[^a-z0-9]+", "-", text.casefold()).strip("-") or "subject"
+def _slug(text: str, limit: int = SLUG_LIMIT) -> str:
+    """Keep room names short, cutting on a whole word when possible."""
+    slug = re.sub(r"[^a-z0-9]+", "-", text.casefold()).strip("-") or "subject"
+    if len(slug) <= limit:
+        return slug
+    head = slug[:limit]
+    if "-" in head:
+        head = head.rsplit("-", 1)[0]
+    return head.rstrip("-") or slug[:limit]
+
+
+def _person(author: str) -> str:
+    """Use the person's name, not just their platform handle, in the record."""
+    name = bootstrap.DEMO_USER_DISPLAY_NAMES.get(author)
+    return f"{name} (@{author})" if name else author
 
 
 def verdict_for(confidence: float, evidence_status: str) -> str:
-    """SPEC 4.5: confirmed only with enough confidence and independent evidence."""
+    """Confirm only with enough classifier confidence and independent evidence."""
     if confidence >= CONFIDENCE_THRESHOLD and evidence_status != "none":
         return "confirmed"
     return "discarded"
@@ -102,7 +117,8 @@ def _quote(claim: PacketClaim, consents: dict[str, ConsentPacket]) -> str:
 def _claim_line(claim: PacketClaim, consents: dict[str, ConsentPacket]) -> str:
     private = " (private)" if claim.channel_type == "channel_private" else ""
     return (
-        f"#{claim.room_name}{private}, {claim.author}, {stamp(claim.ts)}: {_quote(claim, consents)}"
+        f"#{claim.room_name}{private}, {_person(claim.author)}, "
+        f"{stamp(claim.ts)}: {_quote(claim, consents)}"
     )
 
 
@@ -221,11 +237,12 @@ class Arbiter:
     async def _claim_lease(self) -> bool:
         """Re-read the exclusive lease and resolve the server's startup race.
 
-        Switch 0.31.0 grants `assume_role` to two agents that call it at the
-        same instant (scripts/probe_arbiter_lease.py, SWITCH_NOTES "Verified in
-        M7"). Only the alphabetically first holder may act; any other holder
-        calls `release_role` (which releases only its own lease) and returns to
-        standby. Called before acting on EVERY candidate, not just at startup.
+        Switch 0.31.0 can grant an exclusive role twice under a race: two
+        simultaneous `assume_role` calls both succeed (see
+        scripts/probe_arbiter_lease.py). Only the alphabetically first holder
+        may act; any other holder calls `release_role` (which releases only its
+        own lease) and returns to standby. Called before EVERY candidate, not
+        just at startup.
         """
         async with self._role_lock:
             holders = await self._lease_holders()
@@ -602,13 +619,15 @@ class Arbiter:
                 "create_room",
                 name=room_name,
                 description=f"Conflict {candidate.id}: {a.subject} for {a.scope}",
-                agent_names=[AGENT_NAME, SENTINEL_NAME],
+                # The standby is a member too, so it can take over mid-conflict.
+                agent_names=[AGENT_NAME, STANDBY_NAME, SENTINEL_NAME],
                 user_names=[a.author, b.author],
-                channel_type="channel_public",
+                channel_type="channel_private",
                 instructions=(
-                    "Only the two claim authors may close this conflict. One writes "
-                    "'decision: <text>' and the other replies 'confirm'. The Arbiter "
-                    "records their words verbatim and never picks a winner."
+                    "This is a private room for the two claim authors only. One writes "
+                    "'decision: <text>' and the other replies with a short confirmation "
+                    "('confirm', 'confirmed', 'agreed', 'de acuerdo', 'yes', 👍). The "
+                    "Arbiter records their words verbatim and never picks a winner."
                 ),
             )
             room_id = str(created.get("id") or created.get("room_id") or "")
@@ -739,13 +758,13 @@ class Arbiter:
             f"Subject: {a.subject} (scope: {a.scope})",
             f"Classifier confidence: {candidate.confidence:.2f}",
             "",
-            f"Claim A - #{a.room_name}, {a.author}, {stamp(a.ts)}",
+            f"Claim A - #{a.room_name}, {_person(a.author)}, {stamp(a.ts)}",
             f"  {_quote(a, verification.consents)}",
             f"  Origin message: {a.message_id} / thread {a.thread_root}",
             "",
             f"Claim B - #{b.room_name}"
             + (" (private)" if b.channel_type == "channel_private" else "")
-            + f", {b.author}, {stamp(b.ts)}",
+            + f", {_person(b.author)}, {stamp(b.ts)}",
             f"  {_quote(b, verification.consents)}",
             f"  Subject: {b.subject}. Extracted value: {b.value}.",
             f"  Origin message: {b.message_id} / thread {b.thread_root}",
@@ -773,7 +792,7 @@ class Arbiter:
                 f"Evidence ({self._source_label(evidence)}): {summary}",
                 "",
                 "You two decide. When you agree, one of you writes:  decision: <what you agreed>",
-                "and the other replies:  confirm",
+                "and the other replies:  confirm  (or 'Confirmed', 'agreed', 'de acuerdo', 👍)",
                 "I'll record it and correct both original threads.",
             ]
         )
@@ -802,9 +821,14 @@ class Arbiter:
             return
         outcome = verification.machine.handle(author, frame.payload.body)
         if outcome.reply:
-            await self.agent.post(
-                verification.room_id, outcome.reply, thread_id=reply_thread(frame)
-            )
+            # A proposal announcement belongs in the channel itself: a threaded
+            # reply is easy to miss in Mattermost's collapsed-thread view.
+            if outcome.announce:
+                await self.agent.post(verification.room_id, outcome.reply)
+            else:
+                await self.agent.post(
+                    verification.room_id, outcome.reply, thread_id=reply_thread(frame)
+                )
         if outcome.state == DecisionState.DECIDED and not verification.decided:
             await self._on_decided(verification, outcome)
 
@@ -826,7 +850,7 @@ class Arbiter:
                 f'Decision: "{decision.text}"',
                 f"Proposed by: @{decision.proposed_by}",
                 f"Confirmed by: @{decision.confirmed_by}",
-                f"Decided at: {decision.decided_at}",
+                f"Decided at: {stamp_iso(decision.decided_at)}",
             ]
         )
         async with self.agent.act_in(verification.room_id or ""):
@@ -835,8 +859,15 @@ class Arbiter:
                 document_id=verification.document_id,
                 content=verification.record,
             )
+        # Mattermost shows "📄 updated room document", not the document itself,
+        # so the record has to be visible as a chat message too.
         await self.agent.post(
-            verification.room_id or "", "Recorded. Correcting the original threads now."
+            verification.room_id or "",
+            f'Decision recorded: "{decision.text}" '
+            f"(proposed by @{decision.proposed_by}, "
+            f"confirmed by @{decision.confirmed_by}, "
+            f"{stamp_iso(decision.decided_at)}). "
+            "Correcting the original threads now.",
         )
         packet = DecidedPacket(
             candidate_id=verification.candidate.id,
@@ -866,7 +897,7 @@ class Arbiter:
         )
 
     async def _on_corrected(self, packet: CorrectedPacket) -> None:
-        """M6 closing beat: append the final line and confirm in the conflict room."""
+        """Append the final line to the record and confirm in the conflict room."""
         verification = self.verifications.get(packet.candidate_id)
         if (
             verification is None
@@ -906,7 +937,7 @@ def build_runtime(
             f"{ROLE_RETRY_S:.0f}s)",
             f"Consent timeout: {consent_timeout_s:.0f}s (SPLITBRAIN_CONSENT_TIMEOUT_S)",
             f"Evidence timeout: {evidence_timeout_s:.0f}s (SPLITBRAIN_EVIDENCE_TIMEOUT_S)",
-            f"Brief times: {zone_label()} — set SPLITBRAIN_TZ=America/Caracas for local hours",
+            f"Brief times: {zone_label()} (SPLITBRAIN_TZ overrides)",
             "Silent by default: this agent never posts in team rooms.",
         ],
     )

@@ -1,4 +1,4 @@
-"""M6 integration: the full detect -> verify -> convene -> decide -> correct loop.
+"""Full detect -> verify -> convene -> decide -> correct loop.
 
 Needs the running stack (`uv run splitbrain up && uv run splitbrain bootstrap`).
 All three agents run in-process with replay cassettes and fixture evidence, so
@@ -65,6 +65,7 @@ async def test_full_sso_cycle_end_to_end(monkeypatch: pytest.MonkeyPatch) -> Non
     # An isolated store: a previous demo run would otherwise leave active claims
     # that match this run's messages and create a second, stale candidate.
     monkeypatch.setattr(sentinel_agent, "DB_FILENAME", f"sentinel-it-{uuid.uuid4().hex[:8]}.db")
+    monkeypatch.setattr(seed, "SEED_STATE_FILE", f"seeded-it-{uuid.uuid4().hex[:8]}.json")
 
     stop = asyncio.Event()
     runtimes = [
@@ -144,6 +145,8 @@ async def test_full_sso_cycle_end_to_end(monkeypatch: pytest.MonkeyPatch) -> Non
         room_id = str(conflict["room_id"])
         detail = await agent.op("get_room_detail", room_id=room_id, connection=False)
         assert {"maria", "tomas"} <= set(detail.get("connected_user_names") or [])
+        assert detail["channel_type"] == "channel_private"
+        assert "splitbrain-arbiter-b" in (detail.get("agent_names") or [])
 
         joined = await agent.op("connect_to_room", room_id=room_id)
         labels = {link["label"] for link in joined.get("linked_rooms", [])}
@@ -167,7 +170,10 @@ async def test_full_sso_cycle_end_to_end(monkeypatch: pytest.MonkeyPatch) -> Non
         assert any(ENGINEERING_QUOTE in body for body in posts), "the granted quote is missing"
         assert any("decision: SSO beta for Acme" in body for body in posts)
         assert any(body.strip() == "confirm" for body in posts)
-        assert any("Recorded. Correcting the original threads now." in body for body in posts)
+        assert any(
+            "Decision recorded:" in body and "Correcting the original threads now." in body
+            for body in posts
+        )
         assert any("Corrections posted" in body for body in posts)
     finally:
         stream_stop.set()

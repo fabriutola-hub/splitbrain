@@ -1,10 +1,64 @@
-"""SPEC 4.6 step 5: the two-author decision protocol, no model involved."""
+"""The two-author decision protocol, with no model involved."""
 
 from __future__ import annotations
 
 import pytest
 
 from splitbrain.core.decision import DecisionMachine, DecisionState
+
+ACCEPTED: tuple[str, ...] = (
+    "confirm",
+    "confirmed",
+    "Confirmed, I'll email them now.",
+    "CONFIRMED.",
+    "agree",
+    "agreed",
+    "Agreed!",
+    "yes",
+    "Yes, sounds right",
+    "yep",
+    "ok",
+    "okay",
+    "Okay.",
+    "sounds good",
+    "Sounds good!",
+    "approved",
+    "Approved",
+    "lgtm",
+    "LGTM.",
+    "👍",
+    "✅",
+    "sí",
+    "SÍ.",
+    "de acuerdo",
+    "De acuerdo.",
+    "confirmo",
+    "Confirmo!",
+    "aprobado",
+    "Aprobado.",
+)
+
+REJECTED: tuple[str, ...] = (
+    "no",
+    "No",
+    "nope",
+    "maybe",
+    "I don't agree",
+    "not confirmed",
+    "confirmation pending",
+    "confirmable",
+    "since we agreed",
+    "agreement",
+    "wrong",
+    "",
+    "I confirm",
+    "si quieres, esperamos",  # "si" = "if" in Spanish, never a confirmation
+    "ok but not December",
+    "yes, pero en enero",
+    "agreed, but let me check with legal",
+    "sí, no todavía",
+    "confirm, not yet",
+)
 
 
 def test_proposal_then_other_author_confirms() -> None:
@@ -20,11 +74,32 @@ def test_proposal_then_other_author_confirms() -> None:
     assert outcome.decided_at
 
 
+def test_proposal_is_announced_in_the_room_with_its_literal_text() -> None:
+    machine = DecisionMachine("maria", "tomas")
+    outcome = machine.handle("tomas", "decision: SSO in Q1")
+    assert outcome.announce is True
+    assert outcome.reply == (
+        'Proposal from @tomas: "SSO in Q1". '
+        "@maria, reply confirm to close it, or write your own decision: ..."
+    )
+
+
+def test_replaced_proposal_is_announced_again() -> None:
+    machine = DecisionMachine("maria", "tomas")
+    machine.handle("maria", "decision: SSO on December 1")
+    outcome = machine.handle("maria", "decision: SSO on December 15 instead")
+    assert outcome.state == DecisionState.PROPOSED
+    assert outcome.decision == "SSO on December 15 instead"
+    assert outcome.announce is True
+    assert 'Proposal from @maria: "SSO on December 15 instead"' in (outcome.reply or "")
+
+
 def test_non_owner_is_ignored_and_warned_once() -> None:
     machine = DecisionMachine("maria", "tomas")
     first = machine.handle("lucia", "decision: I decide this")
     assert first.state == DecisionState.OPEN
     assert first.reply == "Only @maria and @tomas can close this conflict."
+    assert first.announce is False
     assert machine.handle("lucia", "decision: I insist").reply is None
     assert machine.state == DecisionState.OPEN
 
@@ -32,7 +107,7 @@ def test_non_owner_is_ignored_and_warned_once() -> None:
 def test_same_person_cannot_self_confirm() -> None:
     machine = DecisionMachine("maria", "tomas")
     machine.handle("maria", "decision: SSO beta on Dec 15")
-    outcome = machine.handle("maria", "confirm")
+    outcome = machine.handle("maria", "Confirmed, I'll email them now.")
     assert outcome.state == DecisionState.PROPOSED
     assert outcome.reply == "Only @tomas can confirm this decision."
     assert machine.handle("tomas", "confirmo").state == DecisionState.DECIDED
@@ -48,11 +123,33 @@ def test_new_proposal_replaces_a_pending_one() -> None:
     assert machine.handle("maria", "de acuerdo").state == DecisionState.DECIDED
 
 
-def test_confirm_without_a_proposal_is_refused() -> None:
+def test_only_literal_confirm_without_a_proposal_gets_a_reply() -> None:
     machine = DecisionMachine("maria", "tomas")
-    outcome = machine.handle("tomas", "agree")
+    outcome = machine.handle("tomas", "confirm")
     assert outcome.state == DecisionState.OPEN
     assert outcome.reply == "There is no pending decision to confirm."
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "yes",
+        "ok",
+        "okay",
+        "sí",
+        "👍",
+        "✅",
+        "agreed",
+        "Confirmed, I'll email them now.",
+        "ok but not December",
+        "si quieres, esperamos",
+    ],
+)
+def test_natural_words_without_a_proposal_are_ignored_silently(text: str) -> None:
+    machine = DecisionMachine("maria", "tomas")
+    outcome = machine.handle("tomas", text)
+    assert outcome.state == DecisionState.OPEN
+    assert outcome.reply is None
 
 
 def test_decided_state_is_terminal() -> None:
@@ -69,8 +166,58 @@ def test_two_different_authors_are_required() -> None:
         DecisionMachine("maria", "maria")
 
 
-@pytest.mark.parametrize("word", ["confirm", "confirmo", "agree", "de acuerdo"])
-def test_every_confirmation_word_works(word: str) -> None:
+@pytest.mark.parametrize("text", ACCEPTED)
+def test_every_natural_confirmation_is_accepted(text: str) -> None:
     machine = DecisionMachine("maria", "tomas")
     machine.handle("maria", "decision: agreed text")
-    assert machine.handle("tomas", word).state == DecisionState.DECIDED
+    outcome = machine.handle("tomas", text)
+    assert outcome.state == DecisionState.DECIDED
+    assert outcome.confirmed_by == "tomas"
+    assert outcome.decision == "agreed text"
+
+
+@pytest.mark.parametrize("text", REJECTED)
+def test_every_other_answer_is_ignored(text: str) -> None:
+    machine = DecisionMachine("maria", "tomas")
+    machine.handle("maria", "decision: agreed text")
+    outcome = machine.handle("tomas", text)
+    assert outcome.state == DecisionState.PROPOSED
+    assert outcome.reply is None
+    assert outcome.confirmed_by is None
+
+
+@pytest.mark.parametrize("text", ["confirmed", "CONFIRMED, I'll email them now.", "Sí.", "✅"])
+def test_confirmations_ignore_case_and_trailing_punctuation(text: str) -> None:
+    machine = DecisionMachine("maria", "tomas")
+    machine.handle("maria", "decision: SSO in Q1")
+    assert machine.handle("tomas", text).state == DecisionState.DECIDED
+
+
+def test_spanish_si_without_an_accent_is_not_a_confirmation() -> None:
+    machine = DecisionMachine("maria", "tomas")
+    machine.handle("maria", "decision: SSO in Q1")
+    # "si" means "if" in Spanish: "if you want, we wait".
+    outcome = machine.handle("tomas", "si quieres, esperamos")
+    assert outcome.state == DecisionState.PROPOSED
+    assert outcome.reply is None
+    assert machine.handle("tomas", "SÍ.").state == DecisionState.DECIDED
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "ok but not December",
+        "yes, pero en enero",
+        "agreed, but let me check with legal",
+        "sí, no todavía",
+        "confirm, not yet",
+        "approved, pero solo en enero",
+    ],
+)
+def test_contrast_after_a_confirmation_word_does_not_close_the_decision(text: str) -> None:
+    machine = DecisionMachine("maria", "tomas")
+    machine.handle("maria", "decision: SSO in Q1")
+    outcome = machine.handle("tomas", text)
+    assert outcome.state == DecisionState.PROPOSED
+    assert outcome.reply is None
+    assert machine.handle("tomas", "confirm").state == DecisionState.DECIDED
