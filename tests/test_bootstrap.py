@@ -1,4 +1,4 @@
-"""Unit tests for M2 bootstrap: no stack, no network."""
+"""Unit tests for bootstrap: no stack, no network."""
 
 from __future__ import annotations
 
@@ -313,3 +313,63 @@ def test_extract_values_handles_mixed_shapes() -> None:
         {"unknown": "x"},
     ]
     assert bootstrap._extract_values(entries, ("target_room_id", "id")) == {"r1", "r2", "r3"}
+
+
+class FakeAvatarAdmin:
+    def __init__(self) -> None:
+        self.users = {name: f"user-{name}" for name in bootstrap.AGENT_AVATARS}
+        self.images: dict[str, bytes] = {}
+        self.uploads: list[tuple[str, str]] = []
+
+    async def user_by_username(self, username: str):
+        from splitbrain.switch.mattermost import UserRecord
+
+        user_id = self.users.get(username)
+        return UserRecord(id=user_id, username=username) if user_id else None
+
+    async def profile_image(self, user_id: str) -> bytes | None:
+        return self.images.get(user_id)
+
+    async def set_profile_image(self, user_id: str, data: bytes, filename: str) -> None:
+        self.images[user_id] = b"converted:" + data
+        self.uploads.append((user_id, filename))
+
+
+def _avatar_assets(settings: Settings) -> None:
+    folder = settings.paths.root / bootstrap.ASSETS_DIR
+    folder.mkdir(parents=True, exist_ok=True)
+    for filename in set(bootstrap.AGENT_AVATARS.values()):
+        (folder / filename).write_bytes(f"jpeg:{filename}".encode())
+
+
+async def test_agent_avatars_are_uploaded_once_and_repaired(
+    settings: Settings, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _avatar_assets(settings)
+    admin = FakeAvatarAdmin()
+    state = bootstrap.BootstrapState()
+    await bootstrap.ensure_agent_avatars(settings, state, admin=admin)  # type: ignore[arg-type]
+    assert len(admin.uploads) == len(bootstrap.AGENT_AVATARS)
+    assert admin.uploads[0][1] == "agent-sentinel.jpg"
+    assert len(state.avatar_hash) == len(bootstrap.AGENT_AVATARS)
+
+    before = list(admin.uploads)
+    await bootstrap.ensure_agent_avatars(settings, state, admin=admin)  # type: ignore[arg-type]
+    assert admin.uploads == before, "a second bootstrap must not re-upload"
+
+    admin.images[admin.users["splitbrain-verifier"]] = b"switch-generic-icon"
+    await bootstrap.ensure_agent_avatars(settings, state, admin=admin)  # type: ignore[arg-type]
+    assert len(admin.uploads) == len(before) + 1
+    assert admin.uploads[-1][0] == admin.users["splitbrain-verifier"]
+
+
+async def test_missing_avatar_asset_fails_loud(
+    settings: Settings, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(bootstrap, "AVATAR_LOOKUP_ATTEMPTS", 1)
+    with pytest.raises(SplitbrainError, match="Missing agent avatar"):
+        await bootstrap.ensure_agent_avatars(
+            settings,
+            bootstrap.BootstrapState(),
+            admin=FakeAvatarAdmin(),  # type: ignore[arg-type]
+        )

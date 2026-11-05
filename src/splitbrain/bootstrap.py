@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
+import logging
 import os
 import secrets
 from pathlib import Path
@@ -26,6 +28,13 @@ AGENT_NAMES = (
     "splitbrain-verifier",
     "splitbrain-arbiter-b",
 )
+# The bridge creates one Mattermost bot account per agent, named after the agent.
+AGENT_AVATARS: dict[str, str] = {
+    "splitbrain-sentinel": "agent-sentinel.jpg",
+    "splitbrain-arbiter": "agent-arbiter.jpg",
+    "splitbrain-arbiter-b": "agent-arbiter.jpg",
+    "splitbrain-verifier": "agent-verifier.jpg",
+}
 DEMO_USERS = (
     "maria",
     "tomas",
@@ -54,6 +63,9 @@ HACKATHON_GROUP = "Flip the Switch"
 STATE_ROOMS = (*ALL_ROOMS, *HACKATHON_ROOMS)
 GROUP_NAME = "Acme"
 REFERENCE_NAME = "Acme roadmap"
+ASSETS_DIR = Path("docs") / "assets"
+AVATAR_LOOKUP_ATTEMPTS = 10
+logger = logging.getLogger(__name__)
 DEFAULT_ROADMAP_REPO = "https://github.com/fabriutola-hub/splitbrain-demo-roadmap"
 STATE_FILE = "state.json"
 TEMPLATE_FILE = "splitbrain.template.yaml"
@@ -100,6 +112,7 @@ class BootstrapState(BaseModel):
     mattermost: MattermostState | None = None
     reference: ReferenceState | None = None
     addressing_open_for: dict[str, str] = Field(default_factory=dict)
+    avatar_hash: dict[str, str] = Field(default_factory=dict)
 
 
 class OperationClient(Protocol):
@@ -156,7 +169,7 @@ def expected_channel_types(settings: Settings) -> dict[str, str]:
 
 
 def roadmap_repo(settings: Settings) -> str:
-    """Process env > .env.local > the verified demo repo in SPEC 4.5."""
+    """Process env > .env.local > the public demo roadmap repository."""
     local = dotenv_values(settings.paths.root / ".env.local")
     value = (
         os.environ.get("SPLITBRAIN_ROADMAP_REPO")
@@ -222,6 +235,47 @@ async def ensure_people(
         await user.aclose()
         if username not in state.mattermost.users:
             state.mattermost.users.append(username)
+
+
+async def ensure_agent_avatars(
+    settings: Settings, state: BootstrapState, *, admin: MattermostAdmin
+) -> None:
+    """Give each bridged agent bot its emblem, once per stack.
+
+    Mattermost stores a converted PNG, so idempotency compares the hash of the
+    image read back from the API, not the source JPEG. If Switch replaces an
+    avatar later, bootstrap notices the different hash and uploads it again.
+    """
+    assets = settings.paths.root / ASSETS_DIR
+    for name, filename in AGENT_AVATARS.items():
+        image_path = assets / filename
+        if not image_path.is_file():
+            raise SplitbrainError(f"Missing agent avatar: {image_path}")
+        data = image_path.read_bytes()
+        user = None
+        for _ in range(AVATAR_LOOKUP_ATTEMPTS):
+            user = await admin.user_by_username(name)
+            if user is not None:
+                break
+            await asyncio.sleep(0.5)
+        if user is None:
+            logger.warning(
+                "Mattermost has no account for %s yet; its avatar can be set on the next bootstrap",
+                name,
+            )
+            continue
+        current = await admin.profile_image(user.id)
+        current_hash = hashlib.sha256(current).hexdigest() if current else ""
+        if state.avatar_hash.get(name) == current_hash and current:
+            continue
+        if name in state.avatar_hash:
+            logger.warning("Profile image for %s was replaced; uploading it again", name)
+        await admin.set_profile_image(user.id, data, filename)
+        uploaded = await admin.profile_image(user.id)
+        if not uploaded:
+            raise SplitbrainError(f"Mattermost accepted no profile image for {name}")
+        state.avatar_hash[name] = hashlib.sha256(uploaded).hexdigest()
+        logger.info("Set the %s avatar for %s (%s)", filename, name, user.id[:8])
 
 
 async def ensure_gateway(
@@ -338,7 +392,7 @@ async def ensure_rooms(agent: OperationClient, settings: Settings, state: Bootst
 async def ensure_hackathon_rooms(
     agent: OperationClient, settings: Settings, state: BootstrapState
 ) -> None:
-    """M7: the two public pages, created by their own template, idempotently."""
+    """Create the two public announcement pages, idempotently, from their template."""
     existing = await _all_rooms(agent)
     found = {name: existing[name] for name in HACKATHON_ROOMS if name in existing}
     if found and len(found) != len(HACKATHON_ROOMS):
@@ -450,6 +504,7 @@ async def run(settings: Settings) -> BootstrapState:
         )
         try:
             await ensure_people(settings, state, admin=admin)
+            await ensure_agent_avatars(settings, state, admin=admin)
             save_state(settings, state)
         finally:
             await admin.aclose()

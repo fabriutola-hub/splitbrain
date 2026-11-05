@@ -184,6 +184,14 @@ class MattermostAdmin:
         if self._owns_client:
             await self._client.aclose()
 
+    def _check(self, operation: str, response: httpx.Response) -> None:
+        if not 200 <= response.status_code < 300:
+            raise MattermostError(
+                operation,
+                response.status_code,
+                redact(response.text, (self._client.headers.get("Authorization", ""),)),
+            )
+
     async def login(self) -> None:
         response = await self._client.post(
             f"{self.base_url}{API}/users/login",
@@ -199,6 +207,31 @@ class MattermostAdmin:
         if not token:
             raise MattermostError("users/login", response.status_code, "no Token header")
         self._client.headers["Authorization"] = f"Bearer {token}"
+
+    async def user_by_username(self, username: str) -> UserRecord | None:
+        """Look up a bridged agent's Mattermost account (None before it exists)."""
+        response = await self._client.get(f"{self.base_url}{API}/users/username/{username}")
+        if response.status_code == 404:
+            return None
+        if not 200 <= response.status_code < 300:
+            raise MattermostError("users/username", response.status_code, redact(response.text, ()))
+        return UserRecord.model_validate(response.json())
+
+    async def profile_image(self, user_id: str) -> bytes | None:
+        """Current profile picture. Mattermost converts uploads to PNG."""
+        response = await self._client.get(f"{self.base_url}{API}/users/{user_id}/image")
+        if response.status_code == 404:
+            return None
+        self._check("users/image", response)
+        return response.content
+
+    async def set_profile_image(self, user_id: str, data: bytes, filename: str) -> None:
+        """Set a user's avatar as admin; used for the four agent bot accounts."""
+        response = await self._client.post(
+            f"{self.base_url}{API}/users/{user_id}/image",
+            files={"image": (filename, data, "image/jpeg")},
+        )
+        self._check("users/image", response)
 
     async def set_password(self, user_id: str, password: str) -> None:
         """Set a user's password as admin; repairs a lost demo password in state."""
