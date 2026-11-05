@@ -78,6 +78,14 @@ def test_ensure_env_keeps_existing_env(paths: Paths) -> None:
     assert read_env_values(paths)["DB_PASSWORD"] == (dotenv_values(paths.env_file)["DB_PASSWORD"])
 
 
+def test_postgres_host_port_default_avoids_local_postgres(paths: Paths) -> None:
+    """A clean clone must not publish Postgres on 5432, common on Windows."""
+    assert dotenv_values(EXAMPLE)["POSTGRES_HOST_PORT"] == "55432"
+    assert ensure_env(paths) is True
+    assert dotenv_values(paths.env_file)["POSTGRES_HOST_PORT"] == "55432"
+    assert read_env_values(paths)["POSTGRES_HOST_PORT"] == "55432"
+
+
 def test_ensure_env_fails_loud_on_incomplete_example(paths: Paths) -> None:
     lines = [
         line

@@ -21,6 +21,21 @@ def test_help_lists_every_command(capsys: pytest.CaptureFixture[str]) -> None:
         assert command in output
 
 
+@pytest.mark.parametrize("command", COMMANDS)
+def test_subcommand_help_has_an_english_description(
+    command: str, capsys: pytest.CaptureFixture[str]
+) -> None:
+    with pytest.raises(SystemExit) as exit_info:
+        cli.main([command, "--help"])
+    assert exit_info.value.code == 0
+    output = capsys.readouterr().out
+    head = output.split("options:")[0].split("positional arguments:")[0]
+    prose = " ".join(
+        line.strip() for line in head.splitlines() if line.strip() and not line.startswith("usage:")
+    ).strip()
+    assert len(prose) > 100 and prose.endswith("."), output
+
+
 def test_demo_dispatch_does_not_load_switch_settings(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
