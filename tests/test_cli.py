@@ -59,13 +59,24 @@ def test_demo_dispatch_does_not_load_switch_settings(
             "keep": True,
         }
     ]
+    calls.clear()
+    assert cli.main(["demo", "--auto-decide", "--followup", "--offline"]) == 0
+    assert calls == [
+        {
+            "scenario": "sso",
+            "auto_decide": True,
+            "offline": True,
+            "keep": False,
+            "followup": True,
+        }
+    ]
 
 
 def test_record_dispatch(monkeypatch: pytest.MonkeyPatch) -> None:
-    calls: list[bool] = []
+    calls: list[dict[str, object]] = []
 
-    async def fake_record() -> None:
-        calls.append(True)
+    async def fake_record(**kwargs: object) -> None:
+        calls.append(kwargs)
 
     monkeypatch.setattr(cli.recording, "record_all", fake_record)
     monkeypatch.setattr(
@@ -74,7 +85,10 @@ def test_record_dispatch(monkeypatch: pytest.MonkeyPatch) -> None:
         classmethod(lambda cls, **kwargs: (_ for _ in ()).throw(AssertionError("no Switch here"))),
     )
     assert cli.main(["record"]) == 0
-    assert calls == [True]
+    assert calls == [{}]
+    calls.clear()
+    assert cli.main(["record", "--missing"]) == 0
+    assert calls == [{"missing_only": True}]
 
 
 def test_run_sentinel_dispatch(monkeypatch: pytest.MonkeyPatch) -> None:

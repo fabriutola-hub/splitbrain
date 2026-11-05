@@ -182,7 +182,9 @@ class LLMClient:
         user: str,
         schema: type[SchemaT],
     ) -> SchemaT:
-        if self.mode == "replay":
+        if self.mode == "replay" or (
+            self.mode == "record" and not self.cassettes.overwrite and self.cassettes.has(task, key)
+        ):
             return schema.model_validate(self.cassettes.read(task, key, description))
         result = await self.structured(system, user, schema)
         self.cassettes.write(task, key, input_payload, result.model_dump(mode="json"))

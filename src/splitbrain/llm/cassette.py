@@ -56,15 +56,19 @@ class ReplayMiss(SplitbrainError):
 class CassetteStore:
     """Reads (replay) and writes (record) `cassettes/<task>/<hash>.json`."""
 
-    def __init__(self, root: Path, *, model: str, mode: str) -> None:
+    def __init__(self, root: Path, *, model: str, mode: str, overwrite: bool = True) -> None:
         self.root = root
         self.model = model
         self.mode = mode
+        self.overwrite = overwrite
 
     def path(self, task: str, key: str) -> Path:
         if task not in TASKS:
             raise ValueError(f"Unknown cassette task: {task!r}")
         return self.root / task / f"{key}.json"
+
+    def has(self, task: str, key: str) -> bool:
+        return self.path(task, key).is_file()
 
     def read_record(self, task: str, key: str, description: str) -> dict[str, Any]:
         try:
@@ -89,6 +93,8 @@ class CassetteStore:
         if self.mode != "record":
             return
         path = self.path(task, key)
+        if not self.overwrite and path.is_file():
+            return
         path.parent.mkdir(parents=True, exist_ok=True)
         record = {
             "task": task,

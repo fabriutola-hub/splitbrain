@@ -148,7 +148,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="after the decision and corrections, seed sso-followup to show decision memory",
     )
 
-    commands.add_parser(
+    record_parser = commands.add_parser(
         "record",
         help="refresh eval + scenario cassettes in record mode",
         description=(
@@ -156,6 +156,11 @@ def build_parser() -> argparse.ArgumentParser:
             "write the semantic cassettes in cassettes/. Requires "
             "SPLITBRAIN_LLM_API_KEY in .env.local or the process environment."
         ),
+    )
+    record_parser.add_argument(
+        "--missing",
+        action="store_true",
+        help="record only entries without a cassette file; never overwrite existing ones",
     )
     eval_parser = commands.add_parser(
         "eval",
@@ -185,7 +190,10 @@ async def _dispatch(args: argparse.Namespace) -> int:
         await evaluation.run(args.mode)
         return 0
     if args.command == "record":
-        await recording.record_all()
+        if args.missing:
+            await recording.record_all(missing_only=True)
+        else:
+            await recording.record_all()
         return 0
     if args.command == "demo":
         demo_kwargs: dict[str, Any] = {

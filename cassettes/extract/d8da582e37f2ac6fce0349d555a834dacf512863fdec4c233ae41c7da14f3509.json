@@ -1,0 +1,27 @@
+{
+  "input": {
+    "author": "pablo",
+    "message_id": "sso-followup-1",
+    "room": "finance",
+    "text": "Noted for billing: Acme's SSO beta starts December 15 and GA is in Q1."
+  },
+  "model": "deepseek-ai/DeepSeek-V4.1-Flash-1017",
+  "output": {
+    "claims": [
+      {
+        "confidence": 0.85,
+        "effective_date": "2026-12-15",
+        "kind": "commitment",
+        "polarity": "affirm",
+        "scope": "Acme",
+        "scope_key": "acme",
+        "subject": "SSO beta",
+        "subject_key": "sso",
+        "value": "beta starts 2026-12-15, GA in Q1"
+      }
+    ],
+    "message_id": "sso-followup-1"
+  },
+  "recorded_at": "2026-11-05T06:27:07+00:00",
+  "task": "extract"
+}

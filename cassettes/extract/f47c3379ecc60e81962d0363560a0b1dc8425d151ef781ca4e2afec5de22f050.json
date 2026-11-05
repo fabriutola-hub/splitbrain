@@ -1,0 +1,27 @@
+{
+  "input": {
+    "author": "lucia",
+    "message_id": "sso-followup-0",
+    "room": "support",
+    "text": "Quick one for the desk: Acme gets SSO on December 1, so you can confirm it if they ask."
+  },
+  "model": "deepseek-ai/DeepSeek-V4.1-Flash-1017",
+  "output": {
+    "claims": [
+      {
+        "confidence": 0.9,
+        "effective_date": "2026-12-01",
+        "kind": "commitment",
+        "polarity": "affirm",
+        "scope": "Acme",
+        "scope_key": "acme",
+        "subject": "SSO",
+        "subject_key": "sso",
+        "value": "live on 2026-12-01"
+      }
+    ],
+    "message_id": "sso-followup-0"
+  },
+  "recorded_at": "2026-11-05T06:27:07+00:00",
+  "task": "extract"
+}

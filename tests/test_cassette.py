@@ -7,7 +7,8 @@ from pathlib import Path
 
 import pytest
 
-from splitbrain.core.models import ClassificationResult
+from splitbrain.core.extractor import Extractor
+from splitbrain.core.models import ClaimStatus, ClassificationResult, Message
 from splitbrain.llm.cassette import (
     CassetteStore,
     ReplayMiss,
@@ -101,3 +102,128 @@ async def test_record_writes_one_semantic_cassette(llm_factory) -> None:
     record = json.loads(store.path("classify", "pair-1").read_text(encoding="utf-8"))
     assert record["model"] == client.settings.model
     assert record["output"]["relation"] == "contradiction"
+
+
+async def test_record_missing_never_overwrites_existing_cassettes(llm_factory) -> None:
+    client, transport, store, _ = llm_factory(
+        [
+            {"relation": "contradiction", "confidence": 0.91, "reason": "New pair recorded."},
+            {
+                "results": [
+                    {
+                        "message_id": "m-new",
+                        "claims": [
+                            {
+                                "subject": "SSO",
+                                "scope": "Acme",
+                                "subject_key": "sso",
+                                "scope_key": "acme",
+                                "polarity": "affirm",
+                                "value": "December 1",
+                                "effective_date": "2026-12-01",
+                                "kind": "commitment",
+                                "confidence": 0.9,
+                            }
+                        ],
+                    }
+                ]
+            },
+        ]
+    )
+    store.overwrite = False
+
+    existing_classify = store.path("classify", "existing-pair")
+    existing_classify.parent.mkdir(parents=True, exist_ok=True)
+    original_classify_json = json.dumps(
+        {
+            "input": {"pair": "existing"},
+            "model": "pinned/model-v0",
+            "output": {
+                "relation": "compatible",
+                "confidence": 0.99,
+                "reason": "Original cassette must stay untouched.",
+            },
+            "recorded_at": "2020-01-01T00:00:00+00:00",
+            "task": "classify",
+        },
+        indent=2,
+        sort_keys=True,
+    )
+    existing_classify.write_text(original_classify_json + "\n", encoding="utf-8")
+
+    reused = await client.cached(
+        task="classify",
+        key="existing-pair",
+        description="existing pair",
+        input_payload={"pair": "would-overwrite"},
+        system="sys",
+        user="usr",
+        schema=ClassificationResult,
+    )
+    assert reused.relation.value == "compatible"
+    assert reused.reason == "Original cassette must stay untouched."
+    assert len(transport.calls) == 0
+    assert existing_classify.read_text(encoding="utf-8") == original_classify_json + "\n"
+
+    recorded = await client.cached(
+        task="classify",
+        key="missing-pair",
+        description="missing pair",
+        input_payload={"pair": "new"},
+        system="sys",
+        user="usr",
+        schema=ClassificationResult,
+    )
+    assert recorded.relation.value == "contradiction"
+    assert len(transport.calls) == 1
+    assert store.path("classify", "missing-pair").is_file()
+
+    existing_text = "Acme gets SSO on December 15."
+    existing_extract_key = extract_key(existing_text)
+    existing_extract = store.path("extract", existing_extract_key)
+    existing_extract.parent.mkdir(parents=True, exist_ok=True)
+    original_extract_json = json.dumps(
+        {
+            "input": {"text": existing_text},
+            "model": "pinned/model-v0",
+            "output": {"message_id": "m-old", "claims": []},
+            "recorded_at": "2020-01-01T00:00:00+00:00",
+            "task": "extract",
+        },
+        indent=2,
+        sort_keys=True,
+    )
+    existing_extract.write_text(original_extract_json + "\n", encoding="utf-8")
+
+    extractor = Extractor(client)
+    claims_existing = await extractor.extract_batch(
+        [
+            Message(
+                message_id="m-old",
+                room_id="r-sales",
+                room_name="sales",
+                channel_type="channel_public",
+                author="maria",
+                text=existing_text,
+            )
+        ]
+    )
+    assert claims_existing == {"m-old": []}
+    assert len(transport.calls) == 1
+    assert existing_extract.read_text(encoding="utf-8") == original_extract_json + "\n"
+
+    claims_new = await extractor.extract_batch(
+        [
+            Message(
+                message_id="m-new",
+                room_id="r-support",
+                room_name="support",
+                channel_type="channel_public",
+                author="lucia",
+                text="Quick one for the desk: Acme gets SSO on December 1.",
+            )
+        ]
+    )
+    assert len(claims_new["m-new"]) == 1
+    assert claims_new["m-new"][0].status == ClaimStatus.ACTIVE
+    assert len(transport.calls) == 2

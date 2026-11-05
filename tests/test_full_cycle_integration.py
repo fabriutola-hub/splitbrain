@@ -86,15 +86,35 @@ async def test_full_sso_cycle_end_to_end(monkeypatch: pytest.MonkeyPatch) -> Non
             "all three agent streams to attach, claim rooms and take their roles",
         )
         result = await seed.run(settings, "sso", auto_decide=True)
+        rooms_before = await sentinel_proc.agent.op("list_all_rooms", connection=False)
+        entries_before = (
+            rooms_before if isinstance(rooms_before, list) else rooms_before.get("rooms", [])
+        )
+        conflicts_before = {
+            str(r["name"]) for r in entries_before if str(r.get("name", "")).startswith("conflict-")
+        }
+        followup = await seed.run(settings, "sso-followup")
+        await _until(
+            lambda: (
+                bool(sentinel_proc.reminded_messages)
+                and bool(arbiter_proc.reminded_messages)
+                and sentinel_proc.messages_processed >= 4
+            ),
+            30.0,
+            "the follow-up reminder to be posted and recorded in the decision room",
+        )
     finally:
         stop.set()
         await asyncio.wait_for(asyncio.gather(*tasks, return_exceptions=True), timeout=20.0)
 
+    assert sentinel_proc.candidates_sent == 1
     assert result.conflict_room_name and result.conflict_room_name.startswith("conflict-")
     password = state.mattermost.password
     team = settings.values.get("MATTERMOST_TEAM_NAME", "switch")
     maria = await MattermostUser.login(settings.mattermost_url, "maria", password, team)
     tomas = await MattermostUser.login(settings.mattermost_url, "tomas", password, team)
+    lucia = await MattermostUser.login(settings.mattermost_url, "lucia", password, team)
+    pablo = await MattermostUser.login(settings.mattermost_url, "pablo", password, team)
     try:
         sales = [p for p in result.posted if p.message.room == "sales"]
         engineering = [p for p in result.posted if p.message.room == "engineering"]
@@ -116,9 +136,27 @@ async def test_full_sso_cycle_end_to_end(monkeypatch: pytest.MonkeyPatch) -> Non
             "Update: @maria and @tomas resolved a conflict about SSO for Acme" in post.message
             for post in engineering_thread
         ), "the engineering correction is not a reply in the original thread"
+
+        support = [p for p in followup.posted if p.message.room == "support"]
+        finance = [p for p in followup.posted if p.message.room == "finance"]
+        assert len(support) == 1 and len(finance) == 1
+
+        support_thread = await lucia.thread(support[0].post_id)
+        assert any(
+            "Heads-up: this was already decided." in post.message
+            and "María Gómez and Tomás Rivera agreed:" in post.message
+            and f"(decision record in #{result.conflict_room_name}). Please use that instead."
+            in post.message
+            for post in support_thread
+        ), "the decision reminder is missing from lucia's support thread"
+
+        finance_thread = await pablo.thread(finance[0].post_id)
+        assert len(finance_thread) == 1, "compatible follow-up message must stay silent"
     finally:
         await maria.aclose()
         await tomas.aclose()
+        await lucia.aclose()
+        await pablo.aclose()
 
     # Read Switch artifacts with a short-lived stream, after the agents stopped.
     agent, task, stream_stop = await _read_room_context(settings, state)
@@ -137,9 +175,14 @@ async def test_full_sso_cycle_end_to_end(monkeypatch: pytest.MonkeyPatch) -> Non
         assert any("sb:consent " in body and '"granted":true' in body for body in bodies)
         assert any("sb:decided " in body for body in bodies)
         assert any("sb:corrected " in body for body in bodies)
+        assert any("sb:reminded " in body for body in bodies)
 
         rooms = await agent.op("list_all_rooms", connection=False)
         entries = rooms if isinstance(rooms, list) else rooms.get("rooms", [])
+        conflicts_after = {
+            str(r["name"]) for r in entries if str(r.get("name", "")).startswith("conflict-")
+        }
+        assert conflicts_after == conflicts_before, "follow-up must not open a new conflict room"
         conflict = next((r for r in entries if r.get("name") == result.conflict_room_name), None)
         assert conflict is not None
         room_id = str(conflict["room_id"])
@@ -159,6 +202,10 @@ async def test_full_sso_cycle_end_to_end(monkeypatch: pytest.MonkeyPatch) -> Non
         assert MILESTONE_MOVE in record
         assert "Corrections posted in #sales, #engineering" in record
         assert 'Decision: "SSO beta for Acme on December 15, GA in Q1.' in record
+        assert (
+            "Reminder: Lucía Pérez repeated the earlier information in #support on " in record
+            and "and was pointed to this decision." in record
+        )
 
         timeline = await agent.op("read_context", room_id=room_id, limit=60, connection=False)
         posts = [
@@ -175,6 +222,11 @@ async def test_full_sso_cycle_end_to_end(monkeypatch: pytest.MonkeyPatch) -> Non
             for body in posts
         )
         assert any("Corrections posted" in body for body in posts)
+        assert any(
+            "Heads-up: Lucía Pérez repeated the earlier information in #support; "
+            "I pointed Lucía Pérez to this decision." in body
+            for body in posts
+        )
     finally:
         stream_stop.set()
         task.cancel()

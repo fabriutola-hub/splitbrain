@@ -1,0 +1,38 @@
+{
+  "input": {
+    "claim_a": {
+      "author": "maria",
+      "effective_date": null,
+      "kind": "decision",
+      "polarity": "affirm",
+      "room": "conflict-sb-0001-sso",
+      "scope": "Acme",
+      "scope_key": "acme",
+      "subject": "SSO",
+      "subject_key": "sso",
+      "text": "SSO beta for Acme on December 15, GA in Q1. I'll tell Acme today.",
+      "value": "SSO beta for Acme on December 15, GA in Q1. I'll tell Acme today."
+    },
+    "claim_b": {
+      "author": "pablo",
+      "effective_date": "2026-12-15",
+      "kind": "commitment",
+      "polarity": "affirm",
+      "room": "finance",
+      "scope": "Acme",
+      "scope_key": "acme",
+      "subject": "SSO beta",
+      "subject_key": "sso",
+      "text": "Noted for billing: Acme's SSO beta starts December 15 and GA is in Q1.",
+      "value": "beta starts 2026-12-15, GA in Q1"
+    }
+  },
+  "model": "deepseek-ai/DeepSeek-V4.1-Flash-1017",
+  "output": {
+    "confidence": 0.93,
+    "reason": "Both claims state the same Acme SSO beta on December 15 and Q1 GA, so they agree.",
+    "relation": "compatible"
+  },
+  "recorded_at": "2026-11-05T06:27:10+00:00",
+  "task": "classify"
+}

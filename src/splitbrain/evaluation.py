@@ -233,7 +233,12 @@ def render_markdown(
     return "\n".join(lines)
 
 
-async def run(mode: str | None = None) -> dict[str, Any]:
+async def run(
+    mode: str | None = None,
+    *,
+    overwrite: bool = True,
+    write_report: bool = True,
+) -> dict[str, Any]:
     settings = LLMSettings.load(mode=resolve_mode(mode))
     pairs = load_dataset(settings.eval_dir / "dataset.jsonl")
     print(f"splitbrain eval — {len(pairs)} pairs from eval/dataset.jsonl")
@@ -241,7 +246,12 @@ async def run(mode: str | None = None) -> dict[str, Any]:
     if settings.mode == "replay":
         print("[DEGRADED] replay: reading recorded responses only, no network calls.")
 
-    cassettes = CassetteStore(settings.cassettes_dir, model=settings.model, mode=settings.mode)
+    cassettes = CassetteStore(
+        settings.cassettes_dir,
+        model=settings.model,
+        mode=settings.mode,
+        overwrite=overwrite,
+    )
     llm = LLMClient(settings, cassettes)
     brain = Brain(llm)
     results: list[PairResult] = []
@@ -261,22 +271,23 @@ async def run(mode: str | None = None) -> dict[str, Any]:
     print()
     print_report(metrics, results)
 
-    output = settings.eval_dir / "results.md"
-    previous = _previous_run(output)
-    identical = _same_numbers(previous, metrics, settings.mode)
-    previous_mode = previous[0] if previous else None
-    output.parent.mkdir(parents=True, exist_ok=True)
-    output.write_text(
-        render_markdown(
-            metrics,
-            settings=settings,
-            pairs=pairs,
-            cassette_counts=_cassette_counts(settings.cassettes_dir),
-            previous_mode=previous_mode,
-            identical=identical,
-            marker=_marker(metrics, settings.mode),
-        ),
-        encoding="utf-8",
-    )
-    print(f"\nWrote {output.relative_to(settings.eval_dir.parent)}")
+    if write_report:
+        output = settings.eval_dir / "results.md"
+        previous = _previous_run(output)
+        identical = _same_numbers(previous, metrics, settings.mode)
+        previous_mode = previous[0] if previous else None
+        output.parent.mkdir(parents=True, exist_ok=True)
+        output.write_text(
+            render_markdown(
+                metrics,
+                settings=settings,
+                pairs=pairs,
+                cassette_counts=_cassette_counts(settings.cassettes_dir),
+                previous_mode=previous_mode,
+                identical=identical,
+                marker=_marker(metrics, settings.mode),
+            ),
+            encoding="utf-8",
+        )
+        print(f"\nWrote {output.relative_to(settings.eval_dir.parent)}")
     return metrics
