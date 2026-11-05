@@ -10,7 +10,7 @@ Sales promises Acme that SSO will be live on December 1, in a public channel. En
 
 ![Private conflict room in Mattermost](docs/assets/screens/conflict-room.png)
 
-*The private conflict room `conflict-sb-1847-sso`: the Arbiter's brief with both quotes and the GitHub evidence, María's `decision: …` proposal, Tomás's `Confirmed, thanks!`, the recorded decision and `Corrections posted in #sales, #engineering.`*
+*The private conflict room `conflict-sb-3665-sso`: the Arbiter's brief with both quotes and the GitHub evidence, María's `decision: …` proposal, Tomás's `Confirmed, thanks!`, the recorded decision and `Corrections posted in #sales, #engineering.`*
 
 ## Quick start
 
