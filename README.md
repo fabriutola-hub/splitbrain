@@ -42,13 +42,14 @@ Log in to Mattermost as `maria` and `tomas` (two browser windows, same shared pa
 
 Without an API key the demo runs in replay mode: only the sentences recorded in `cassettes/` are recognised. Write anything else and `ReplayMiss` is raised, naming the input — no answer is invented. Put `SPLITBRAIN_LLM_API_KEY` (and optionally `SPLITBRAIN_LLM_BASE_URL` / `SPLITBRAIN_LLM_MODEL`) in the gitignored `.env.local` and you can write freely in any room; any OpenAI-compatible endpoint works.
 
-A quick check that silence still works after a real conflict:
+A quick check that silence still works after a real conflict — and that a recorded decision is remembered instead of reopened:
 
 ```bash
-uv run splitbrain seed near-misses   # 0 candidates, 0 new conflict rooms
+uv run splitbrain seed near-misses     # 0 candidates, 0 new conflict rooms
+uv run splitbrain seed sso-followup    # 1 reminder in #support, 0 new conflict rooms
 ```
 
-It deliberately follows the SSO scenario: Pablo's "Correction to my earlier note…" and the other near-misses must not produce a second alert. Seeding the *same* scenario twice against the same stack is refused; different scenarios are allowed.
+Both deliberately follow the SSO scenario: Pablo's "Correction to my earlier note…" and the other near-misses must not produce a second alert, while `sso-followup` posts Lucía's stale December 1 promise in `#support` (the Sentinel replies in her thread with the recorded decision instead of opening a second conflict room) and Pablo's compatible December 15 / Q1 note in `#finance` (which stays completely silent). Seeding the *same* scenario twice against the same stack is refused; different scenarios are allowed.
 
 ## What it looks like
 
@@ -61,6 +62,21 @@ It deliberately follows the SSO scenario: Pablo's "Correction to my earlier note
 
 *The Sentinel's live terminal view (`uv run splitbrain run sentinel --tui`): team messages on the left, the linked contradiction and full SSO lifecycle on the right.*
 
+## Decision memory
+
+Once two people resolve a conflict, reopening a second conflict room the next time someone repeats the old information would violate **People decide** and turn Splitbrain into noise. Instead, the recorded human decision is stored as an active `DECISION` claim and backed by the Switch room document in `#conflict-sb-…`.
+
+When a later message matches that subject and scope, the `DECISION` claim takes priority over every other match (including for the original authors themselves):
+
+- **Contradicts the decision (`confidence ≥ 0.7`):** the Sentinel reads the conflict room's internal document via `load_internal_documents` to confirm `Status: DECIDED`, replies once in the contradicting message's thread (`Heads-up: this was already decided. On Nov 5, María Gómez and Tomás Rivera agreed: "SSO beta for Acme on December 15, GA in Q1. I'll tell Acme today." (decision record in #conflict-sb-…-sso). Please use that instead.`), stores the stale claim as `SUPERSEDED` so it never pairs again, and sends `sb:reminded` to the Arbiter. The Arbiter appends a `Reminder:` line to the room document (`update_room_document`) and posts a one-line notice in the conflict room. No `Candidate` is created and no new conflict room is opened.
+- **Compatible with the decision:** total silence (`No alert: compatible`).
+
+Run the full loop plus the follow-up in one command:
+
+```bash
+uv run splitbrain demo --auto-decide --followup
+```
+
 ## How Splitbrain uses Switch
 
 Switch is not a notification channel bolted on at the end: rooms, roles, references, documents, links, targeted messages and the event stream *are* the application's transport and state. There is no shared database or socket between the three agent processes.
@@ -70,7 +86,7 @@ Switch is not a notification channel bolted on at the end: rooms, roles, referen
 | Own SSE protocol client: `GET /agents/{id}/events?scope=all&filter=all&start_from=head`, 2 s heartbeat (6 s TTL), `Last-Event-ID` resume on the **same** `connection_id`, backoff capped at 5 s | `src/splitbrain/switch/sse.py`, `src/splitbrain/switch/events.py`, `src/splitbrain/switch/client.py` | No SDK. `scope=all&filter=all` is what lets the Sentinel see messages that do **not** mention an agent (`addressed=false`); `sequence` is kept as a Python `int` because observed values are ~9.0e15 (just below 2^53) and the protocol does not bound them. Heartbeat 404/409 reopens the stream instead of backing off. |
 | `create_room(..., user_names=[...], agent_names=[...], channel_type="channel_private")` | `src/splitbrain/agents/arbiter.py` (`_open_conflict`) | Conflict rooms are private and created at runtime with exactly the two claim authors, the Arbiter, the standby Arbiter (`splitbrain-arbiter-b`, so it can take over mid-conflict) and the Sentinel. The room instructions say only those two people may close it. |
 | `link_rooms` | `src/splitbrain/agents/arbiter.py` (`_link_origins`), `src/splitbrain/bootstrap.py`, `src/splitbrain/agents/sentinel.py` (`sb:link_request` fallback) | A conflict room links back to both origin rooms with labels `origin: #sales (maria)` and `origin: #engineering (tomas)`. Verified against the server: linking works even when the caller is not a member of the target room. |
-| `create_room_document` / `update_room_document` | `src/splitbrain/agents/arbiter.py` (`_open_conflict`, `_on_decided`, `_on_corrected`) | The decision record is a Switch room document: `Status: OPEN` at creation, then `DECIDED` with the exact words the two people wrote, then a final `Corrections posted in #sales, #engineering` line. Because Mattermost only shows "📄 updated room document", the Arbiter also posts the record as a readable chat message. |
+| `create_room_document` / `load_internal_documents` / `update_room_document` | `src/splitbrain/agents/arbiter.py` (`_open_conflict`, `_on_decided`, `_on_corrected`, `_on_reminded`), `src/splitbrain/agents/sentinel.py` (`_read_decision_record`, `_remind`) | The decision record is a Switch room document: `Status: OPEN` at creation, then `DECIDED` with the exact words the two people wrote, then `Corrections posted in #sales, #engineering`. It also acts as Splitbrain's **decision memory**: before posting a reminder on a later contradicting message, the Sentinel reads the room document via `load_internal_documents` and confirms `Status: DECIDED`, and the Arbiter appends a `Reminder:` audit line via `update_room_document`. Because Mattermost only shows "📄 updated room document", the Arbiter also posts the record and reminder updates as readable chat messages. |
 | `send_targeted_message` to roles and names, in a thread | `src/splitbrain/switch/client.py` (`targeted`), `src/splitbrain/agents/sentinel.py`, `src/splitbrain/agents/arbiter.py`, `src/splitbrain/agents/verifier.py`, `src/splitbrain/core/packets.py` | All inter-agent traffic is readable chat in `splitbrain-ops` plus one `sb:<kind> {json}` line: Sentinel → `target_roles=["arbiter"]`, Arbiter → `target_roles=["verifier"]`, Arbiter/Verifier → `target_names=["splitbrain-sentinel"]`. Replies stay in the originating thread. |
 | `read_context` | `src/splitbrain/demo.py`, `src/splitbrain/agents/arbiter.py` | The demo's packet polling and verification reads work without an open stream (`connection=False`); `threads` is oldest-first, so the tail is freshest. |
 | `connect_to_room` | `src/splitbrain/switch/client.py` (`act_in`), `src/splitbrain/agents/coverage.py` | "The connected room" is connection state, so every connect+act sequence is serialized under one `asyncio.Lock` per connection. A `scope=all` stream opens with **empty** coverage: claiming a room is also how an agent starts receiving its events. |
@@ -102,6 +118,9 @@ flowchart TB
     A -->|"sb:decided"| S
     S -->|"thread replies in the two origin rooms"| X["Corrections: everyone sees the same truth"]
     S -->|"sb:corrected"| A
+    F["Later in #support — Lucía repeats Dec 1"] --> S
+    S -->|"load_internal_documents (Status: DECIDED) → thread reminder + sb:reminded"| A
+    A -->|"update_room_document (Reminder: ...)"| R
 ```
 
 All inter-agent state travels as normal Switch messages. Locally we keep only `.splitbrain/state.json` (agent credentials, room ids and the demo password), `.splitbrain/seeded_scenarios.json` (which scenario was already posted against this stack) and the Sentinel's SQLite database `.splitbrain/sentinel.db` (`src/splitbrain/core/store.py`) for claims, candidates and idempotency.
@@ -112,8 +131,8 @@ Role instructions shown in Switch live in `agents/sentinel.md`, `agents/arbiter.
 
 | Agent | Does | Never does |
 | --- | --- | --- |
-| <img src="docs/assets/agent-sentinel.jpg" width="96" height="96" alt="Sentinel emblem"><br>**Sentinel** (`src/splitbrain/agents/sentinel.py`) | Prefilters chatter, extracts claims, matches pairs from different rooms, classifies them, sends candidates, asks a private-room author for consent in their own thread, posts corrections in the threads where the claims were born. | Decide which statement is true, open rooms, assign roles, or post anything else in a team room. |
-| <img src="docs/assets/agent-arbiter.jpg" width="96" height="96" alt="Arbiter emblem"><br>**Arbiter** (`src/splitbrain/agents/arbiter.py`) | Holds the exclusive `arbiter` lease, requests evidence, confirms or discards, opens and links a private conflict room, writes both quotes and the evidence in a room document, runs the decision protocol, records the decision verbatim. | Read team rooms directly, pick a winner, rewrite what people decided, or reveal a private quote before its author consents. |
+| <img src="docs/assets/agent-sentinel.jpg" width="96" height="96" alt="Sentinel emblem"><br>**Sentinel** (`src/splitbrain/agents/sentinel.py`) | Prefilters chatter, extracts claims, matches pairs from different rooms, classifies them, sends candidates, asks a private-room author for consent in their own thread, posts corrections in the threads where the claims were born, and replies with a reminder in the thread when a new message contradicts a recorded human decision. | Decide which statement is true, open rooms, assign roles, or post anything else in a team room. |
+| <img src="docs/assets/agent-arbiter.jpg" width="96" height="96" alt="Arbiter emblem"><br>**Arbiter** (`src/splitbrain/agents/arbiter.py`) | Holds the exclusive `arbiter` lease, requests evidence, confirms or discards, opens and links a private conflict room, writes both quotes and the evidence in a room document, runs the decision protocol, records the decision verbatim, and appends follow-up reminders to the decision record. | Read team rooms directly, pick a winner, rewrite what people decided, or reveal a private quote before its author consents. |
 | <img src="docs/assets/agent-verifier.jpg" width="96" height="96" alt="Verifier emblem"><br>**Verifier** (`src/splitbrain/agents/verifier.py`) | Reads the GitHub reference on `splitbrain-ops`, searches issues and milestone timelines, and returns a short human-readable evidence summary with a status. | Decide anything, open rooms, post in team rooms, or contact people. |
 
 A fourth process, `splitbrain-arbiter-b`, is a standby Arbiter: it holds no lease until the primary stops, and is a member of every conflict room so it can take over without losing the conversation.
@@ -122,7 +141,7 @@ A fourth process, `splitbrain-arbiter-b`, is a standby Arbiter: it holds no leas
 
 These are enforced in code, not just prose:
 
-1. **Silent by default.** Agents never post in team rooms except a consent question in the author's own thread and corrections after a human decision, in the original thread. `src/splitbrain/agents/sentinel.py` (`ignored_source`, `_ask_consent`, `_apply_corrections`) and `src/splitbrain/agents/arbiter.py`.
+1. **Silent by default.** Agents never post in team rooms except a consent question in the author's own thread, corrections after a human decision in the original thread, and a reminder of a recorded human decision in the contradicting message's thread. `src/splitbrain/agents/sentinel.py` (`ignored_source`, `_ask_consent`, `_apply_corrections`, `_remind`) and `src/splitbrain/agents/arbiter.py`.
 2. **People decide.** No agent picks the correct version. `src/splitbrain/core/decision.py` (`DecisionMachine`) and `src/splitbrain/agents/arbiter.py` (`_on_decided`) record and propagate exactly what people wrote.
 3. **Consent before revealing.** A quote from a `channel_private` room is never put in `splitbrain-ops` (not even in a packet). `src/splitbrain/agents/sentinel.py` (`_candidate_payload`, `_consent_reply`) sends only a paraphrase plus subject/value, carries `"text": null, "text_withheld": true`, and sends the verbatim text only after the author says yes; `src/splitbrain/agents/arbiter.py` (`_quote`) shows "(quote withheld at the author's request)" otherwise. Conflict rooms themselves are `channel_private`.
 4. **No evidence, no interruption.** `src/splitbrain/agents/arbiter.py` (`verdict_for`, `CONFIDENCE_THRESHOLD`) discards a candidate without independent evidence or with classifier confidence < 0.7, and nobody is bothered.
@@ -218,7 +237,7 @@ src/splitbrain/
   agents/            base.py  coverage.py  sentinel.py  arbiter.py  verifier.py
 agents/              sentinel.md  arbiter.md  verifier.md  (role instructions shown in Switch)
 templates/           splitbrain.template.yaml  hackathon.template.yaml
-seed/                scenarios/{sso,refunds,hackathon,near-misses}.yaml  github_fixture.json  scenario_evidence.json
+seed/                scenarios/{sso,sso-followup,refunds,hackathon,near-misses}.yaml  github_fixture.json  scenario_evidence.json
 cassettes/           extract/  classify/  (committed record/replay responses)
 eval/                dataset.jsonl  results.md
 scripts/             probe_arbiter_lease.py  record_github_fixture.py  render_tui_svg.py
