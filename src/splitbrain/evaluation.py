@@ -536,7 +536,12 @@ async def run(
 ) -> dict[str, Any]:
     settings = LLMSettings.load(mode=resolve_mode(mode))
     source, display, suffix = resolve_dataset(settings, dataset)
-    pairs = load_dataset_v2(source) if dataset is not None else load_dataset(source)
+    release_dataset = settings.eval_dir / "dataset.jsonl"
+    if dataset is None or source.resolve() == release_dataset.resolve():
+        # Passing the release dataset explicitly must behave exactly like the default.
+        pairs = load_dataset(source)
+    else:
+        pairs = load_dataset_v2(source)
     print(f"splitbrain eval — {len(pairs)} pairs from {display}")
     print(f"LLM: mode={settings.mode} | model={settings.model} | base_url={settings.base_url}")
     if settings.mode == "replay":
