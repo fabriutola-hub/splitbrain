@@ -256,6 +256,7 @@ class Sentinel:
             room.room_id: room.channel_type for room in state.rooms.values()
         }
         self.claimed: set[str] = set()
+        self._claim_locks: dict[str, asyncio.Lock] = {}
         self.pending: asyncio.Queue[Message] = asyncio.Queue()
         self.stop = asyncio.Event()
         self.worker: asyncio.Task[None] | None = None
@@ -339,18 +340,22 @@ class Sentinel:
         self.tui.add_step(candidate_id, "room", f"room #{name}")
 
     async def _claim_room(self, room_id: str) -> None:
-        if not room_id or room_id in self.claimed:
+        if not room_id:
             return
-        # Mark before awaiting: connect_to_room itself emits subscription_changed.
-        self.claimed.add(room_id)
-        name = self.rooms.get(room_id, room_id)
-        try:
-            # act_in holds the per-connection lock while it claims the room.
-            async with self.agent.act_in(room_id):
-                pass
+        # A second caller must await the first claim's completion, not mistake
+        # an in-flight request for room readiness. Subscription events are queued.
+        async with self._claim_locks.setdefault(room_id, asyncio.Lock()):
+            if room_id in self.claimed:
+                return
+            name = self.rooms.get(room_id, room_id)
+            try:
+                async with self.agent.act_in(room_id):
+                    pass
+            except Exception:
+                logger.exception("Could not claim room #%s; messages there may be missed", name)
+                return
+            self.claimed.add(room_id)
             logger.info("Claimed room #%s for the event stream", name)
-        except Exception:
-            logger.exception("Could not claim room #%s; messages there may be missed", name)
 
     async def _on_connection_state(self, frame: ConnectionStateFrame) -> None:
         logger.info(
@@ -930,6 +935,15 @@ class Sentinel:
         if locks is None:
             locks = self._correction_locks = {}
         async with locks.setdefault(decided.candidate_id, asyncio.Lock()):
+            if decided.candidate_id in self.corrected:
+                return
+            self.rooms.setdefault(decided.conflict_room, decided.conflict_room_name)
+            await self._claim_room(decided.conflict_room)
+            if decided.conflict_room not in self.claimed:
+                raise SplitbrainError(
+                    f"Cannot resume corrections for {decided.candidate_id}: "
+                    "the conflict room claim did not complete"
+                )
             await self._resume_corrections(frame, decided)
 
     async def _save_corrections(self, document_id: str, journal: CorrectionJournal) -> str:
