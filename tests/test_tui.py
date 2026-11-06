@@ -22,7 +22,16 @@ SNAPSHOT = Path(__file__).with_name("tui_snapshot_120x32.txt")
 
 
 def _render(view: SentinelTui) -> str:
-    console = Console(width=view.width, height=view.height, record=True, file=StringIO())
+    console = Console(
+        width=view.width,
+        height=view.height,
+        record=True,
+        file=StringIO(),
+        force_terminal=True,
+        color_system=None,
+        legacy_windows=False,
+        safe_box=False,
+    )
     console.print(view.render())
     return console.export_text()
 

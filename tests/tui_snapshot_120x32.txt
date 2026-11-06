@@ -1,32 +1,32 @@
- SPLITBRAIN SENTINEL | LLM replay | DeepSeek-V4.1-Flash-1017 | internal 14 | messages 5 | filtered 1 | candidates 1    
-┌──────────────────────────────────────────────── SPLITBRAIN SENTINEL ────────────────────────────────────────────────┐
-│ INCOMING MESSAGES                                              │ CANDIDATE LIFECYCLE                                │
-│ ───────────────────────────────────────────────────────────────┼─────────────────────────────────────────────────── │
-│ 23:18  #sales · María Gómez (@maria)                           │ [sb-8510]                                          │
-│   Morning! Big one: confirmed with Acme that SSO will be live  │ #sales María: SSO for Acme = live on December 1    │
-│   for them on December 1.                                      │ ↔ CONTRADICTION ↔                                  │
-│ 23:18  #support · Lucía Pérez (@lucia)                         │ #engineering Tomás: SSO = removed from Q4          │
-│   Reminder: the support desk closes at 6 pm this week while    │ 23:18:41  ✓ candidate sent (SSO for Acme)          │
-│   half the team is at the offsite.                             │ 23:18:43  ✓ evidence: GitHub issue #2 moved Q4     │
-│ 23:18  #engineering · Tomás Rivera (@tomas)                    │            2026 → Q1 2027                          │
-│   Heads up: we're pulling SSO out of Q4. The auth migration    │ 23:18:44  ✓ verdict CONFIRMED                      │
-│   has to land first.                                           │ 23:18:45  ✓ consent asked @tomas                   │
-│ 23:18  #finance · Pablo Ruiz (@pablo)                          │ 23:18:47  ✓ consent granted @tomas                 │
-│   Q4 budget review moved to Thursday.                          │ 23:18:49  ✓ room #conflict-sb-8510-sso             │
-│ 23:19  #engineering · Tomás Rivera (@tomas)                    │ 23:19:12  ✓ DECIDED "SSO beta for Acme on December │
-│   yes                                                          │            15, GA in Q1."                          │
-│                                                                │ 23:19:13  ✓ corrections posted in #sales,          │
-│                                                                │            #engineering                            │
-│                                                                │                                                    │
-│                                                                │                                                    │
-│                                                                │                                                    │
-│                                                                │                                                    │
-│                                                                │                                                    │
-│                                                                │                                                    │
-│                                                                │                                                    │
-└─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
-┌──────────────────────────────────────────────────────── LOG ────────────────────────────────────────────────────────┐
-│ Extracted 1 claim(s) from #sales: sso/acme=December 1                                                               │
-│ No alert: compatible (confidence 0.90): two phases of one rollout                                                   │
-│ Corrections posted in #sales, #engineering for sb-8510                                                              │
-└─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
+ SPLITBRAIN SENTINEL | LLM replay | DeepSeek-V4.1-Flash-1017 | internal 14 | messages 5 | filtered 1 | candidates 1     
+╭──────────────────────────────────────────────── SPLITBRAIN SENTINEL ─────────────────────────────────────────────────╮
+│ INCOMING MESSAGES                                              │ CANDIDATE LIFECYCLE                                 │
+│ ───────────────────────────────────────────────────────────────┼───────────────────────────────────────────────────  │
+│ 23:18  #sales · María Gómez (@maria)                           │ [sb-8510]                                           │
+│   Morning! Big one: confirmed with Acme that SSO will be live  │ #sales María: SSO for Acme = live on December 1     │
+│   for them on December 1.                                      │ ↔ CONTRADICTION ↔                                   │
+│ 23:18  #support · Lucía Pérez (@lucia)                         │ #engineering Tomás: SSO = removed from Q4           │
+│   Reminder: the support desk closes at 6 pm this week while    │ 23:18:41  ✓ candidate sent (SSO for Acme)           │
+│   half the team is at the offsite.                             │ 23:18:43  ✓ evidence: GitHub issue #2 moved Q4      │
+│ 23:18  #engineering · Tomás Rivera (@tomas)                    │            2026 → Q1 2027                           │
+│   Heads up: we're pulling SSO out of Q4. The auth migration    │ 23:18:44  ✓ verdict CONFIRMED                       │
+│   has to land first.                                           │ 23:18:45  ✓ consent asked @tomas                    │
+│ 23:18  #finance · Pablo Ruiz (@pablo)                          │ 23:18:47  ✓ consent granted @tomas                  │
+│   Q4 budget review moved to Thursday.                          │ 23:18:49  ✓ room #conflict-sb-8510-sso              │
+│ 23:19  #engineering · Tomás Rivera (@tomas)                    │ 23:19:12  ✓ DECIDED "SSO beta for Acme on December  │
+│   yes                                                          │            15, GA in Q1."                           │
+│                                                                │ 23:19:13  ✓ corrections posted in #sales,           │
+│                                                                │            #engineering                             │
+│                                                                │                                                     │
+│                                                                │                                                     │
+│                                                                │                                                     │
+│                                                                │                                                     │
+│                                                                │                                                     │
+│                                                                │                                                     │
+│                                                                │                                                     │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+╭──────────────────────────────────────────────────────── LOG ─────────────────────────────────────────────────────────╮
+│ Extracted 1 claim(s) from #sales: sso/acme=December 1                                                                │
+│ No alert: compatible (confidence 0.90): two phases of one rollout                                                    │
+│ Corrections posted in #sales, #engineering for sb-8510                                                               │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯

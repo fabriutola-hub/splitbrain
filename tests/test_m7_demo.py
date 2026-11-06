@@ -27,6 +27,14 @@ def _paths() -> Paths:
     return Paths.default()
 
 
+@pytest.fixture(autouse=True)
+def _fake_docker(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """These tests exercise demo modes, not the Docker CLI; Settings.load still needs one."""
+    fake_docker = tmp_path / "docker"
+    fake_docker.touch()
+    monkeypatch.setenv("SPLITBRAIN_DOCKER", str(fake_docker))
+
+
 # ── Modes and banners ──────────────────────────────────────────────────────
 
 
