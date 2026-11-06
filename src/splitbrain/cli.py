@@ -22,6 +22,7 @@ def build_parser() -> argparse.ArgumentParser:
         epilog=(
             "First run on any OS (uv + Docker required):\n"
             "  uv run splitbrain demo --auto-decide\n"
+            "  uv run splitbrain demo --auto-decide --recovery\n"
             "  uv run splitbrain eval\n"
             "  uv run splitbrain status\n"
             "Run 'splitbrain <command> --help' for the full options of a command."
@@ -147,6 +148,14 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="after the decision and corrections, seed sso-followup to show decision memory",
     )
+    demo_parser.add_argument(
+        "--recovery",
+        action="store_true",
+        help=(
+            "demonstrate arbiter takeover, Sentinel restart and duplicate confirmation handling; "
+            "requires --auto-decide and --scenario sso"
+        ),
+    )
 
     record_parser = commands.add_parser(
         "record",
@@ -209,6 +218,12 @@ async def _dispatch(args: argparse.Namespace) -> int:
             await recording.record_all()
         return 0
     if args.command == "demo":
+        demo.validate_options(
+            scenario=args.scenario,
+            auto_decide=args.auto_decide,
+            followup=args.followup,
+            recovery=args.recovery,
+        )
         demo_kwargs: dict[str, Any] = {
             "scenario": args.scenario,
             "auto_decide": args.auto_decide,
@@ -217,6 +232,8 @@ async def _dispatch(args: argparse.Namespace) -> int:
         }
         if args.followup:
             demo_kwargs["followup"] = True
+        if args.recovery:
+            demo_kwargs["recovery"] = True
         await demo.run(**demo_kwargs)
         return 0
 

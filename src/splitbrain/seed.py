@@ -13,7 +13,7 @@ import time
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Protocol
 
 import yaml
 from pydantic import BaseModel, ConfigDict, Field
@@ -77,6 +77,12 @@ class SeedResult:
     scenario: str
     posted: list[PostedMessage]
     conflict_room_name: str | None = None
+
+
+class DecisionHooks(Protocol):
+    async def before_confirm(self, room_name: str) -> None: ...
+
+    async def after_confirm(self, room_name: str) -> None: ...
 
 
 def scenario_path(settings: Settings, name: str) -> Path:
@@ -310,6 +316,7 @@ async def _auto_decide(
     existing_conflicts: set[str],
     password: str,
     team: str,
+    hooks: DecisionHooks | None = None,
 ) -> str:
     if scenario.decision is None:
         raise SplitbrainError(
@@ -376,9 +383,14 @@ async def _auto_decide(
         )
         await first.post(channel_id, decision.propose["text"])
         print(f"  [auto-decide] @{proposer}: {decision.propose['text']}", flush=True)
-        await asyncio.sleep(0.5)
+        if hooks is None:
+            await asyncio.sleep(0.5)
+        else:
+            await hooks.before_confirm(room_name)
         await second.post(channel_id, decision.confirm["text"])
         print(f"  [auto-decide] @{confirmer}: {decision.confirm['text']}", flush=True)
+        if hooks is not None:
+            await hooks.after_confirm(room_name)
 
         await _wait_for(
             f"the final '{CORRECTIONS_MARKER}' confirmation in #{room_name} (expected "
@@ -392,7 +404,13 @@ async def _auto_decide(
         await agent.aclose()
 
 
-async def run(settings: Settings, name: str, *, auto_decide: bool = False) -> SeedResult:
+async def run(
+    settings: Settings,
+    name: str,
+    *,
+    auto_decide: bool = False,
+    decision_hooks: DecisionHooks | None = None,
+) -> SeedResult:
     scenario = load_scenario(settings, name)
     if auto_decide and scenario.decision is None:
         raise SplitbrainError(
@@ -443,6 +461,7 @@ async def run(settings: Settings, name: str, *, auto_decide: bool = False) -> Se
                 existing_conflicts,
                 password,
                 team,
+                hooks=decision_hooks,
             )
         print(f"Scenario {name!r} posted ({total} messages).", flush=True)
         mark_seeded(settings, name)
