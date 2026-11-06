@@ -59,6 +59,7 @@ from ..core.protocol import (
     VerdictPacket,
     read_packet,
 )
+from ..core.publication import assert_can_publish, collect_policy_claims
 from ..core.store import ClaimStore, PairState, PairStatus, pair_id
 from ..core.timefmt import short_day
 from ..llm.cassette import CassetteStore, ReplayMiss
@@ -985,7 +986,18 @@ class Sentinel:
             f"#{decided.conflict_room_name}. Decision: {quoted_sentence(decided.decision.text)} "
             "Please use this from now on."
         )
+        policy_claims, policy_reason = await collect_policy_claims(
+            self.store, decided.candidate_id, record=record, origins=decided.origins
+        )
         for progress in journal.threads:
+            assert_can_publish(
+                progress.room_name,
+                body,
+                private_claims=policy_claims,
+                public_claims=policy_claims,
+                classifier_reason=policy_reason,
+                approved_decision_text=decided.decision.text,
+            )
             if progress.status == "posted":
                 continue
             context = await self.agent.op(
@@ -1114,6 +1126,17 @@ class Sentinel:
             f"Heads-up: this was already decided. On {short_day(decision.ts)}, "
             f"{authors} agreed: {quoted_sentence(decision.text)} "
             f"(decision record in #{decision.room_name}). Please use that instead."
+        )
+        policy_claims, policy_reason = await collect_policy_claims(
+            self.store, candidate_id, record=record
+        )
+        assert_can_publish(
+            message.room_name,
+            body,
+            private_claims=policy_claims,
+            public_claims=policy_claims,
+            classifier_reason=policy_reason,
+            approved_decision_text=decision.text,
         )
         await self.agent.post(message.room_id, body, thread_id=thread_root)
         person = _person(message.author)

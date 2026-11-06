@@ -53,6 +53,7 @@ class DecisionRecord(BaseModel):
     writer: str
     revision: int = Field(default=0, ge=0)
     decision_announced: bool = False
+    followup_logged: bool = False
     decision_sent: bool = False
     corrected: bool = False
     corrections: list[CorrectionProgress] = Field(default_factory=list)

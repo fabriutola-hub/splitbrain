@@ -39,6 +39,12 @@ from ..core.decision_record import (
     record_body,
     render_record,
 )
+from ..core.followup import (
+    FollowupTask,
+    closing_summary_line,
+    extract_followup_task,
+    record_business_followup,
+)
 from ..core.models import Decision, Evidence
 from ..core.packets import encode
 from ..core.protocol import (
@@ -57,6 +63,11 @@ from ..core.protocol import (
     RemindedPacket,
     VerdictPacket,
     read_packet,
+)
+from ..core.publication import (
+    PUBLICATION_NOTICE,
+    assert_arbiter_can_publish,
+    public_topic_fields,
 )
 from ..core.timefmt import stamp, stamp_iso, zone_label
 from ..switch.client import SwitchAgent, SwitchOpError
@@ -167,6 +178,8 @@ class Verification:
     link_future: asyncio.Future[LinkedPacket] | None = None
     link_labels: list[str] = field(default_factory=list)
     finished: bool = False
+    followup_logged: bool = False
+    followup_task: FollowupTask | None = None
     durable: DecisionRecord | None = None
     lock: asyncio.Lock = field(default_factory=asyncio.Lock)
     last_correction_request: float = 0.0
@@ -641,10 +654,18 @@ class Arbiter:
             verification.origins = state.origins
             verification.thread_id = state.ops_thread_id
             verification.corrected = state.corrected
+            verification.followup_logged = state.followup_logged
         else:
             verification.machine = self._restore_legacy_machine(verification)
             verification.corrected = "Corrections posted in " in selected.content
+            verification.followup_logged = (
+                "Follow-up:" in selected.content or verification.corrected
+            )
         verification.decided = verification.machine.state == DecisionState.DECIDED
+        if verification.decided:
+            verification.followup_task = extract_followup_task(
+                self._decision_packet(verification).decision
+            )
         own = next(
             (item for item in records if item.state and item.state.writer == self.name), None
         )
@@ -715,6 +736,8 @@ class Arbiter:
             writer=self.name,
             revision=(previous.revision if previous else 0) + 1,
             decision_announced=previous.decision_announced if previous else False,
+            followup_logged=verification.followup_logged
+            or (previous.followup_logged if previous else False),
             decision_sent=previous.decision_sent if previous else False,
             corrected=verification.corrected,
             corrections=(
@@ -819,7 +842,9 @@ class Arbiter:
                 content=verification.record,
             )
         verification.document_id = str(document["document_id"])
-        await self.agent.post(room_id, self._brief(verification))
+        brief = self._brief(verification)
+        self._validate_post(room_id, brief, verification=verification, room_name=room_name)
+        await self.agent.post(room_id, brief)
         logger.info(
             "Conflict room #%s ready for %s (document %s, links %s, reused=%s)",
             room_name,
@@ -951,6 +976,7 @@ class Arbiter:
                 "You two decide. When you agree, one of you writes:  decision: <what you agreed>",
                 "and the other replies:  confirm  (or 'Confirmed', 'agreed', 'de acuerdo', 👍)",
                 "I'll record it and correct both original threads.",
+                PUBLICATION_NOTICE,
             ]
         )
 
@@ -966,6 +992,32 @@ class Arbiter:
             if "github.com" in url:
                 return f"GitHub, {'/'.join(url.split('/')[3:5])}"
         return "GitHub, Acme roadmap"
+
+    def _validate_post(
+        self,
+        room_id: str,
+        body: str,
+        *,
+        verification: Verification | None = None,
+        room_name: str | None = None,
+        approved_decision_text: str | None = None,
+    ) -> None:
+        if room_id == self.ops_room_id:
+            target = OPS_ROOM
+        elif room_name:
+            target = room_name
+        elif verification is not None and verification.room_name:
+            target = verification.room_name
+        else:
+            target = self.coverage.rooms.get(room_id, "")
+            if not target and room_id.startswith("r-conflict"):
+                target = "conflict-room"
+        assert_arbiter_can_publish(
+            target,
+            body,
+            verification=verification,
+            approved_decision_text=approved_decision_text,
+        )
 
     # ── Decision protocol ──────────────────────────────────────────────────
 
@@ -987,6 +1039,7 @@ class Arbiter:
             durable_before = (
                 verification.durable.model_copy(deep=True) if verification.durable else None
             )
+            followup_before = verification.followup_logged
             outcome = verification.machine.handle(
                 author,
                 frame.payload.body,
@@ -1004,6 +1057,7 @@ class Arbiter:
                             verification.machine = DecisionMachine.restore(before)
                             verification.record = record_before
                             verification.durable = durable_before
+                            verification.followup_logged = followup_before
                         raise
                 elif not verification.corrected:
                     await self._publish_decision(verification)
@@ -1018,6 +1072,9 @@ class Arbiter:
                 if outcome.announce:
                     await self._announce_proposal(verification)
                 else:
+                    self._validate_post(
+                        verification.room_id, outcome.reply, verification=verification
+                    )
                     await self.agent.post(
                         verification.room_id, outcome.reply, thread_id=reply_thread(frame)
                     )
@@ -1040,6 +1097,12 @@ class Arbiter:
         )
         ident = posted_message(context, body, {AGENT_NAME, STANDBY_NAME})
         if not ident:
+            self._validate_post(
+                verification.room_id or "",
+                body,
+                verification=verification,
+                approved_decision_text=machine.decision,
+            )
             result = await self.agent.post(verification.room_id or "", body)
             ident = message_id(result)
         machine.bind_announcement(ident)
@@ -1076,6 +1139,7 @@ class Arbiter:
         machine = verification.machine
         if machine is None or machine.state != DecisionState.DECIDED:
             raise SplitbrainError("Only a final human decision can be published")
+        subject, subject_key, scope, scope_key = public_topic_fields(verification.candidate)
         return DecidedPacket(
             candidate_id=verification.candidate.id,
             decision=Decision(
@@ -1089,10 +1153,10 @@ class Arbiter:
             conflict_room=verification.room_id or "",
             conflict_room_name=verification.room_name,
             origins=verification.origins,
-            subject=verification.candidate.claim_a.subject,
-            subject_key=verification.candidate.claim_a.subject_key,
-            scope=verification.candidate.claim_a.scope,
-            scope_key=verification.candidate.claim_a.scope_key,
+            subject=subject,
+            subject_key=subject_key,
+            scope=scope,
+            scope_key=scope_key,
             authors=[claim.author for claim in verification.claims],
         )
 
@@ -1123,9 +1187,23 @@ class Arbiter:
                 "read_context", room_id=verification.room_id, limit=CONTEXT_LIMIT, connection=False
             )
             if not posted_message(context, body, {AGENT_NAME, STANDBY_NAME}):
+                self._validate_post(
+                    verification.room_id or "",
+                    body,
+                    verification=verification,
+                    approved_decision_text=decision.text,
+                )
                 await self.agent.post(verification.room_id or "", body)
             state.decision_announced = True
             await self._save_record(verification)
+        if not state.followup_logged and not verification.followup_logged:
+            await record_business_followup(self, verification, decision)
+            verification.followup_logged = True
+            assert verification.durable is not None
+            verification.durable.followup_logged = True
+            await self._save_record(verification)
+        elif verification.followup_task is None:
+            verification.followup_task = extract_followup_task(decision)
         body = (
             f'Decision recorded for {verification.candidate.id.upper()}: "{decision.text}" '
             f"(proposed by @{decision.proposed_by}, confirmed by @{decision.confirmed_by}). "
@@ -1137,12 +1215,19 @@ class Arbiter:
                 "read_context", room_id=self.ops_room_id, limit=CONTEXT_LIMIT, connection=False
             )
             if retry or not posted_message(context, body, {AGENT_NAME, STANDBY_NAME}):
+                self._validate_post(
+                    self.ops_room_id,
+                    body,
+                    verification=verification,
+                    approved_decision_text=decision.text,
+                )
                 await self.agent.targeted(
                     self.ops_room_id,
                     body,
                     target_names=[SENTINEL_NAME],
                     thread_id=verification.thread_id,
                 )
+            assert verification.durable is not None
             verification.durable.decision_sent = True
             await self._save_record(verification)
         logger.info(
@@ -1182,6 +1267,7 @@ class Arbiter:
             return
         if verification.durable is None:
             await self._save_record(verification)
+        assert verification.durable is not None
         verification.durable.corrections = journal.threads
         rooms = ", ".join(f"#{item.room_name}" for item in journal.threads)
         line = f"Corrections posted in {rooms}"
@@ -1194,11 +1280,17 @@ class Arbiter:
         except Exception:
             verification.corrected = False
             raise
+        summary = closing_summary_line(verification, rooms)
         context = await self.agent.op(
             "read_context", room_id=verification.room_id, limit=CONTEXT_LIMIT, connection=False
         )
-        if not posted_message(context, f"{line}.", {AGENT_NAME, STANDBY_NAME}):
-            await self.agent.post(verification.room_id or "", f"{line}.")
+        if not posted_message(context, summary, {AGENT_NAME, STANDBY_NAME}):
+            self._validate_post(
+                verification.room_id or "",
+                summary,
+                verification=verification,
+            )
+            await self.agent.post(verification.room_id or "", summary)
         logger.info("%s for %s", line, verification.candidate.id)
 
     async def _on_reminded(self, frame: MessageFrame, packet: RemindedPacket) -> None:
@@ -1227,6 +1319,12 @@ class Arbiter:
             async with verification.lock:
                 verification.record = record_body(verification.record) + f"\n\n{record_line}"
                 await self._save_record(verification)
+            self._validate_post(
+                room_id,
+                chat_line,
+                verification=verification,
+                room_name=packet.conflict_room_name,
+            )
             await self.agent.post(room_id, chat_line)
             self.reminded_messages.add(packet.message_id)
             return
@@ -1262,6 +1360,12 @@ class Arbiter:
                     document_id=document_id,
                     content=updated,
                 )
+        self._validate_post(
+            room_id,
+            chat_line,
+            verification=verification,
+            room_name=packet.conflict_room_name,
+        )
         await self.agent.post(room_id, chat_line)
         self.reminded_messages.add(packet.message_id)
         logger.info(

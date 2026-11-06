@@ -148,6 +148,15 @@ class ClaimStore:
             result.append(claim.model_copy(update={"status": ClaimStatus(row["status"])}))
         return result
 
+    def _all_claims(self) -> list[Claim]:
+        with self._lock:
+            rows = self._connection.execute("SELECT payload, status FROM claims").fetchall()
+        result: list[Claim] = []
+        for row in rows:
+            claim = Claim.model_validate_json(row["payload"])
+            result.append(claim.model_copy(update={"status": ClaimStatus(row["status"])}))
+        return result
+
     def _claim_by_id(self, claim_id: str) -> Claim | None:
         with self._lock:
             row = self._connection.execute(
@@ -179,6 +188,15 @@ class ClaimStore:
                 "INSERT OR IGNORE INTO candidates (id, payload, created_at) VALUES (?, ?, ?)",
                 (candidate.id, candidate.model_dump_json(), candidate.created_at),
             )
+
+    def _candidate_by_id(self, candidate_id: str) -> Candidate | None:
+        with self._lock:
+            row = self._connection.execute(
+                "SELECT payload FROM candidates WHERE id = ?", (candidate_id,)
+            ).fetchone()
+        if row is None:
+            return None
+        return Candidate.model_validate_json(row["payload"])
 
     def _is_candidate_published(self, candidate_id: str) -> bool:
         with self._lock:
@@ -371,6 +389,9 @@ class ClaimStore:
     async def active_claims(self) -> list[Claim]:
         return await self._run(self._active_claims)
 
+    async def all_claims(self) -> list[Claim]:
+        return await self._run(self._all_claims)
+
     async def claim_by_id(self, claim_id: str) -> Claim | None:
         return await self._run(self._claim_by_id, claim_id)
 
@@ -379,6 +400,9 @@ class ClaimStore:
 
     async def add_candidate(self, candidate: Candidate) -> None:
         await self._run(self._add_candidate, candidate)
+
+    async def candidate_by_id(self, candidate_id: str) -> Candidate | None:
+        return await self._run(self._candidate_by_id, candidate_id)
 
     async def is_candidate_published(self, candidate_id: str) -> bool:
         return await self._run(self._is_candidate_published, candidate_id)
