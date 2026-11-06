@@ -61,14 +61,14 @@ The demo stops the primary Arbiter after its persisted proposal v1, waits for ar
 
 For this run only, the first Sentinel process receives `SPLITBRAIN_FAULT=sentinel-exit-after-first-correction`. This demo/test hook exits with code 86 immediately after the first correction's receipt is saved as `posted`. The demo reads that checkpoint, restarts the Sentinel without the variable, and verifies delivery of the pending correction. The hook is disabled by default.
 
-Expected summary shape below (example IDs; replace with verified live output):
+Output of a real run (Switch 0.31.0, `--offline`, 2026-11-06):
 
 ```text
 RECOVERY SUMMARY
-Arbiter takeover:  primary stopped after proposal v1; arbiter-b adopted #conflict-sb-XXXX-sso from the room document and recorded the decision (same room, same proposal; it writes its own takeover snapshot because Switch only lets a document's creator edit it)
+Arbiter takeover:  primary stopped after proposal v1; arbiter-b adopted #conflict-sb-3109-sso from the room document and recorded the decision (same room, same proposal; it writes its own takeover snapshot because Switch only lets a document's creator edit it)
 Sentinel restart:  exited after 1 of 2 corrections; restarted; posted the missing one; each thread has exactly 1 correction
 Duplicate event:   repeated confirmation ignored; still 1 decision, 2 corrections, 1 room
-Room documents:   canonical <original-document-id> preserved; 1 standby-owned recovery snapshot(s)
+Room documents:   canonical 01920378-d132-44af-97e1-aa24e62c4399 preserved; 1 standby-owned recovery snapshot(s)
 ```
 
 Every step fails with the expected and observed state if a condition is unmet. The regular `DEMO SUMMARY` is also printed. The live test follows exactly this path: `uv run pytest tests/test_recovery_integration.py -m integration -q -s` (run it alone; it resets the demo stack).
