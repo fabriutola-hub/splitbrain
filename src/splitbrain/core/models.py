@@ -177,6 +177,29 @@ EvidenceStatus = Literal[
     "unavailable",
 ]
 
+EVIDENCE_SUMMARY_LABELS: dict[EvidenceStatus, str] = {
+    "supports_a": "Supports A:",
+    "supports_b": "Supports B:",
+    "conflicting": "Ambiguous:",
+    "inconclusive": "Insufficient evidence:",
+    "none": "Insufficient evidence:",
+    "unavailable": "Evidence unavailable:",
+}
+EVIDENCE_SUMMARY_LABEL_TEXTS: tuple[str, ...] = tuple(
+    dict.fromkeys(EVIDENCE_SUMMARY_LABELS.values())
+)
+
+
+def labeled_evidence_summary(status: EvidenceStatus, summary: str) -> str:
+    """Prefix one short summary with its status label, exactly once."""
+    text = summary.strip()
+    label = EVIDENCE_SUMMARY_LABELS[status]
+    if not text:
+        return label
+    if any(text.casefold().startswith(item.casefold()) for item in EVIDENCE_SUMMARY_LABEL_TEXTS):
+        return text
+    return f"{label} {text}"
+
 
 class Evidence(BaseModel):
     candidate_id: str

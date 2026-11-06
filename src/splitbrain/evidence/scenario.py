@@ -20,7 +20,7 @@ from typing import Any
 from pydantic import BaseModel, ConfigDict, Field
 
 from ..config import Paths, SplitbrainError
-from ..core.models import Evidence, EvidenceItem
+from ..core.models import Evidence, EvidenceItem, EvidenceStatus, labeled_evidence_summary
 
 ENV_VAR = "SPLITBRAIN_SCENARIO_EVIDENCE"
 FIXTURE_RELATIVE_PATH = Path("seed") / "scenario_evidence.json"
@@ -61,12 +61,13 @@ class ScenarioEvidence:
         return any(keyword.casefold() in needle for keyword in self.keywords)
 
     def evidence(self, candidate_id: str) -> Evidence:
+        status: EvidenceStatus = "conflicting"
         return Evidence(
             candidate_id=candidate_id,
             source="scenario_fixture",
-            status="conflicting",
+            status=status,
             items=list(self.items),
-            summary=self.summary,
+            summary=labeled_evidence_summary(status, self.summary),
             detail=f"{self.label}: {self.detail}",
         )
 

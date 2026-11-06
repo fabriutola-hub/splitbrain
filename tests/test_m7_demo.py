@@ -213,8 +213,18 @@ def test_scenario_evidence_is_explicit_and_not_github(monkeypatch: pytest.Monkey
     evidence = entry.evidence("sb-0001")
     assert evidence.source == "scenario_fixture"
     assert evidence.status == "conflicting"
+    assert evidence.summary == f"Ambiguous: {entry.summary}"
     assert "20 merged pull requests" in evidence.summary
     assert "not a GitHub issue" in evidence.detail
+    already_labeled = scenario_evidence.ScenarioEvidence(
+        name=entry.name,
+        label=entry.label,
+        keywords=entry.keywords,
+        summary="Ambiguous: already labelled",
+        detail=entry.detail,
+        items=entry.items,
+    )
+    assert already_labeled.evidence("sb-0002").summary == "Ambiguous: already labelled"
     monkeypatch.setenv(scenario_evidence.ENV_VAR, "hackathon")
     assert scenario_evidence.load_scenario_evidence(_paths()) == entry
 

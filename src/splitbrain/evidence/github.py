@@ -24,7 +24,7 @@ from dotenv import dotenv_values
 from pydantic import BaseModel, ConfigDict, Field
 
 from ..config import Paths, SplitbrainError, internet_client
-from ..core.models import Evidence, EvidenceItem, EvidenceStatus
+from ..core.models import Evidence, EvidenceItem, EvidenceStatus, labeled_evidence_summary
 from ..core.protocol import EvidenceClaim
 
 logger = logging.getLogger(__name__)
@@ -822,23 +822,16 @@ def build_evidence(
         )
         reason = condition_note or _direction_reason(before, after, values_a, values_b, direction)
         reason = reason[:1].upper() + reason[1:]
-        if direction == "supports_b":
-            summary = f"Supports B: {move_sentence}"
-            detail = f"GitHub, {slug}: {summary} {reason}. Timeline: {timeline_text(issue)}. {tail}"
-        elif direction == "supports_a":
-            summary = f"Supports A: {move_sentence}"
-            detail = f"GitHub, {slug}: {summary} {reason}. Timeline: {timeline_text(issue)}. {tail}"
-        elif direction == "conflicting":
-            summary = f"Ambiguous: {move_sentence}"
-            detail = f"GitHub, {slug}: {summary} {reason}. Timeline: {timeline_text(issue)}. {tail}"
-        else:
-            summary = f"Insufficient evidence: {move_sentence}"
-            detail = f"GitHub, {slug}: {summary} {reason}. Timeline: {timeline_text(issue)}. {tail}"
         status = direction
+        summary = labeled_evidence_summary(status, move_sentence)
+        detail = f"GitHub, {slug}: {summary} {reason}. Timeline: {timeline_text(issue)}. {tail}"
     elif relevant_issues:
         issue = relevant_issues[0]
         milestone = f", milestone {issue.milestone}" if issue.milestone else ""
-        summary = f'Ambiguous: issue #{issue.number} "{issue.title}" is open{milestone}.'
+        status = "conflicting"
+        summary = labeled_evidence_summary(
+            status, f'issue #{issue.number} "{issue.title}" is open{milestone}.'
+        )
         matched = [value for value in values if issue_is_relevant(issue, [value])]
         matched_text = _format_disputed_values(matched)
         detail = (
@@ -846,12 +839,12 @@ def build_evidence(
             f"It mentions {matched_text} from the two claims but records no milestone move, "
             f"so it does not settle which claim is right. {tail}"
         )
-        status = "conflicting"
     elif open_issues:
         disputed = _format_disputed_values(values)
-        summary = (
-            f'Insufficient evidence: {len(open_issues)} open issue(s) mention "{subject}", '
-            f"but none mentions {disputed}."
+        status = "inconclusive"
+        summary = labeled_evidence_summary(
+            status,
+            f'{len(open_issues)} open issue(s) mention "{subject}", but none mentions {disputed}.',
         )
         closest = open_issues[0]
         milestone = f", milestone {closest.milestone}" if closest.milestone else ""
@@ -859,11 +852,10 @@ def build_evidence(
             f"GitHub, {slug}: {summary} "
             f'Closest open issue: #{closest.number} "{closest.title}"{milestone}. {tail}'
         )
-        status = "inconclusive"
     else:
-        summary = f'Insufficient evidence: no open issue mentions "{subject}".'
-        detail = f"GitHub, {slug}: {summary} {tail}"
         status = "none"
+        summary = labeled_evidence_summary(status, f'no open issue mentions "{subject}".')
+        detail = f"GitHub, {slug}: {summary} {tail}"
     return Evidence(
         candidate_id=candidate_id,
         source=source,
