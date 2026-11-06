@@ -53,11 +53,6 @@ REJECTED: tuple[str, ...] = (
     "",
     "I confirm",
     "si quieres, esperamos",  # "si" = "if" in Spanish, never a confirmation
-    "ok but not December",
-    "yes, pero en enero",
-    "agreed, but let me check with legal",
-    "sí, no todavía",
-    "confirm, not yet",
 )
 
 
@@ -79,7 +74,7 @@ def test_proposal_is_announced_in_the_room_with_its_literal_text() -> None:
     outcome = machine.handle("tomas", "decision: SSO in Q1")
     assert outcome.announce is True
     assert outcome.reply == (
-        'Proposal from @tomas: "SSO in Q1". '
+        'Proposal v1 from @tomas: "SSO in Q1". '
         "@maria, reply confirm to close it, or write your own decision: ..."
     )
 
@@ -91,7 +86,7 @@ def test_replaced_proposal_is_announced_again() -> None:
     assert outcome.state == DecisionState.PROPOSED
     assert outcome.decision == "SSO on December 15 instead"
     assert outcome.announce is True
-    assert 'Proposal from @maria: "SSO on December 15 instead"' in (outcome.reply or "")
+    assert 'Proposal v2 from @maria: "SSO on December 15 instead"' in (outcome.reply or "")
 
 
 def test_non_owner_is_ignored_and_warned_once() -> None:
@@ -219,7 +214,7 @@ def test_contrast_after_a_confirmation_word_does_not_close_the_decision(text: st
     machine.handle("maria", "decision: SSO in Q1")
     outcome = machine.handle("tomas", text)
     assert outcome.state == DecisionState.PROPOSED
-    assert outcome.reply is None
+    assert "v1 is still open" in (outcome.reply or "")
     assert machine.handle("tomas", "confirm").state == DecisionState.DECIDED
 
 
@@ -259,4 +254,4 @@ def test_proposal_without_terminal_punctuation_gets_exactly_one_stop() -> None:
     machine = DecisionMachine("maria", "tomas")
     outcome = machine.handle("maria", "decision: SSO in Q1")
     assert outcome.reply is not None
-    assert 'Proposal from @maria: "SSO in Q1". @tomas' in outcome.reply
+    assert 'Proposal v1 from @maria: "SSO in Q1". @tomas' in outcome.reply

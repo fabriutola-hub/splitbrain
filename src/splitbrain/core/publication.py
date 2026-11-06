@@ -5,7 +5,7 @@ Splitbrain enforces three publication boundaries across Switch rooms:
 1. A verbatim quote from a ``channel_private`` room is shown only in the
    private ``conflict-sb-*`` room and only after its author grants consent
    (plus inside the targeted ``sb:consent`` packet to the Arbiter). It is never
-   posted in ``splitbrain-ops`` readable text, in `` Customer commitments``, or
+   posted in ``splitbrain-ops`` readable text, in ``Customer commitments``, or
    in any team room.
 2. Fields derived by the model from a ``channel_private`` message (extracted
    ``subject``, extracted ``value``, classifier ``reason``) may appear only in
@@ -19,10 +19,11 @@ Splitbrain enforces three publication boundaries across Switch rooms:
 from __future__ import annotations
 
 from collections.abc import Iterable, Mapping
+from typing import Any
 
 from ..config import SplitbrainError
-from .models import Claim
-from .protocol import CandidatePacket, ConsentPacket, PacketClaim
+from .models import Claim, ClaimKind
+from .protocol import CandidatePacket, ConsentPacket, OriginRef, PacketClaim
 
 OPS_ROOM = "splitbrain-ops"
 CONFLICT_PREFIX = "conflict-"
@@ -195,3 +196,83 @@ def assert_can_publish(
             )
 
     return body
+
+
+def assert_arbiter_can_publish(
+    target_room: str,
+    body: str,
+    *,
+    verification: Any = None,
+    approved_decision_text: str | None = None,
+) -> str:
+    """Enforce that the Arbiter publishes only to internal rooms and obeys the policy."""
+    if not is_internal_room(target_room):
+        raise PublicationPolicyError(
+            f"Arbiter cannot publish to #{target_room.lstrip('#')}; "
+            "allowed only in conflict rooms and splitbrain-ops."
+        )
+    claims = verification.claims if verification is not None else ()
+    consents = verification.consents if verification is not None else None
+    reason = verification.candidate.reason if verification is not None else None
+    if approved_decision_text is None and verification is not None and verification.machine:
+        approved_decision_text = verification.machine.decision
+    return assert_can_publish(
+        target_room,
+        body,
+        private_claims=claims,
+        public_claims=claims,
+        consents=consents,
+        classifier_reason=reason,
+        approved_decision_text=approved_decision_text,
+    )
+
+
+async def collect_policy_claims(
+    store: Any,
+    candidate_id: str,
+    *,
+    record: str | None = None,
+    origins: Iterable[OriginRef] = (),
+) -> tuple[list[Claim | PacketClaim], str | None]:
+    """Gather stored claims and decision-record metadata for Sentinel publication checks."""
+    from .decision_record import STATE_PREFIX, DecisionRecord
+
+    claims: list[Claim | PacketClaim] = []
+    seen_ids: set[str] = set()
+    reason: str | None = None
+
+    if store is not None:
+        for origin in origins:
+            claim = await store.claim_by_id(origin.claim_id)
+            if claim is not None and claim.id not in seen_ids:
+                claims.append(claim)
+                seen_ids.add(claim.id)
+        if hasattr(store, "candidate_by_id"):
+            candidate = await store.candidate_by_id(candidate_id)
+            if candidate is not None:
+                reason = reason or candidate.reason or None
+                for cand_claim in (candidate.claim_a, candidate.claim_b):
+                    if cand_claim.id not in seen_ids:
+                        claims.append(cand_claim)
+                        seen_ids.add(cand_claim.id)
+
+    if record and STATE_PREFIX in record:
+        try:
+            state = DecisionRecord.model_validate_json(record.rpartition(STATE_PREFIX)[2])
+            reason = reason or state.candidate.reason or None
+            for pkt_claim in state.candidate.claims:
+                if pkt_claim.id not in seen_ids:
+                    claims.append(pkt_claim)
+                    seen_ids.add(pkt_claim.id)
+                else:
+                    claims.append(pkt_claim)
+        except ValueError:
+            pass
+
+    if not claims and store is not None and hasattr(store, "all_claims"):
+        for stored_claim in await store.all_claims():
+            if stored_claim.kind != ClaimKind.DECISION and stored_claim.id not in seen_ids:
+                claims.append(stored_claim)
+                seen_ids.add(stored_claim.id)
+
+    return claims, reason

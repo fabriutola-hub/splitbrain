@@ -152,37 +152,50 @@ def test_consent_timeout_fills_missing_answers_as_denied() -> None:
 
 
 async def test_corrected_appends_the_final_line_and_confirms_in_the_room() -> None:
-    from contextlib import asynccontextmanager
+    from decision_fakes import FakeSwitch
 
-    from splitbrain.core.protocol import CorrectedPacket
-
-    class FakeAgent:
-        def __init__(self) -> None:
-            self.updates: list[dict] = []
-            self.posts: list[tuple[str, str]] = []
-
-        @asynccontextmanager
-        async def act_in(self, room_id: str):
-            yield self
-
-        async def op(self, name: str, /, **args) -> dict:
-            self.updates.append({"name": name, **args})
-            return {}
-
-        async def post(self, room_id: str, body: str, **kwargs) -> dict:
-            self.posts.append((room_id, body))
-            return {}
+    from splitbrain.core.decision import DecisionMachine
+    from splitbrain.core.decision_record import CorrectionJournal, pending_corrections
+    from splitbrain.core.protocol import CorrectedPacket, OriginRef
 
     arbiter = make_arbiter()
     item = verification(granted=True)
     item.room_id = "r-conflict"
     item.room_name = "conflict-sb-0001-sso"
-    item.document_id = "doc-1"
     item.record = "Status: DECIDED\nDecision: SSO in Q1"
     item.decided = True
+    item.machine = DecisionMachine("maria", "tomas", conflict_id=item.candidate.id)
+    item.machine.handle("maria", "decision: SSO in Q1")
+    item.machine.handle("tomas", "confirm")
+    item.origins = [
+        OriginRef(
+            room_id=claim.room_id,
+            room_name=claim.room_name,
+            thread_id=claim.thread_root,
+            message_id=claim.message_id,
+            author=claim.author,
+            claim_id=claim.id,
+        )
+        for claim in item.claims
+    ]
     arbiter.verifications[item.candidate.id] = item
-    fake = FakeAgent()
+    fake = FakeSwitch(mod.AGENT_NAME)
     arbiter.agent = fake  # type: ignore[assignment]
+    arbiter.is_holder = True
+    await arbiter._save_record(item)
+    journal = CorrectionJournal(
+        decided=arbiter._decision_packet(item), threads=pending_corrections(item.origins)
+    )
+    for index, progress in enumerate(journal.threads):
+        progress.status = "posted"
+        progress.message_id = f"sw_correction_{index}"
+    fake.state.documents["doc-journal"] = {
+        "id": "doc-journal",
+        "name": "SB-0001 correction progress",
+        "room_id": "r-conflict",
+        "owner": "splitbrain-sentinel",
+        "content": journal.render(),
+    }
 
     packet = CorrectedPacket(
         candidate_id="sb-0001",
@@ -193,12 +206,12 @@ async def test_corrected_appends_the_final_line_and_confirms_in_the_room() -> No
     await arbiter._on_corrected(packet)
     assert item.corrected is True
     assert "Corrections posted in #sales, #engineering" in item.record
-    assert fake.updates[-1]["name"] == "update_room_document"
-    assert "Corrections posted in #sales, #engineering" in fake.updates[-1]["content"]
-    assert fake.posts[-1] == (
-        "r-conflict",
+    update = next(args for name, args in reversed(fake.calls) if name == "update_room_document")
+    assert "Corrections posted in #sales, #engineering" in update["content"]
+    assert fake.posts[-1]["room_id"] == "r-conflict"
+    assert fake.posts[-1]["body"] == (
         'Corrections posted in #sales, #engineering; "Customer commitments" '
-        "updated for Acme in #splitbrain-ops (no follow-up task).",
+        "updated for Acme in #splitbrain-ops (no follow-up task)."
     )
     # A duplicate packet must not append the line twice.
     await arbiter._on_corrected(packet)
@@ -257,7 +270,7 @@ async def test_conflict_room_is_private_and_invites_the_standby_arbiter() -> Non
 async def test_decision_message_shows_the_record_people_can_read() -> None:
     from contextlib import asynccontextmanager
 
-    from splitbrain.core.decision import DecisionMachine, DecisionOutcome, DecisionState
+    from splitbrain.core.decision import DecisionMachine
 
     class FakeAgent:
         def __init__(self) -> None:
@@ -283,17 +296,11 @@ async def test_decision_message_shows_the_record_people_can_read() -> None:
     item.room_name = "conflict-sb-0001-sso"
     item.document_id = "doc-1"
     item.record = "Status: OPEN"
-    item.machine = DecisionMachine("maria", "tomas")
+    item.machine = DecisionMachine("maria", "tomas", conflict_id=item.candidate.id)
     fake = FakeAgent()
     arbiter.agent = fake  # type: ignore[assignment]
-    outcome = DecisionOutcome(
-        state=DecisionState.DECIDED,
-        reply=None,
-        decision="SSO beta for Acme on December 15, GA in Q1.",
-        proposed_by="tomas",
-        confirmed_by="maria",
-        decided_at="2026-11-05T03:18:00+00:00",
-    )
+    item.machine.handle("tomas", "decision: SSO beta for Acme on December 15, GA in Q1.")
+    outcome = item.machine.handle("maria", "confirm")
     await arbiter._on_decided(item, outcome)
 
     message = fake.posts[-1][1]

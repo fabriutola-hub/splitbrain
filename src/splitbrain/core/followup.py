@@ -24,6 +24,8 @@ from datetime import UTC, datetime
 from typing import Any
 
 from .. import bootstrap
+from ..switch.client import SwitchOpError
+from .decision_record import CONTEXT_LIMIT, posted_message, record_body
 from .keys import KNOWN_CUSTOMER_KEYS, canonical_scope_key, slugify
 from .models import Claim, Decision
 from .protocol import CandidatePacket, PacketClaim
@@ -305,6 +307,11 @@ def format_commitment_entry(
     return entry
 
 
+def _entry_marker(entry: str) -> str:
+    match = re.match(r"^(\[[A-Z0-9-]+\])", entry.strip())
+    return match.group(1) if match else entry.strip()
+
+
 async def upsert_customer_commitments(
     agent: Any,
     ops_room_id: str,
@@ -313,35 +320,53 @@ async def upsert_customer_commitments(
     state_holder: Any = None,
 ) -> tuple[str, str]:
     """Create or update the ``Customer commitments`` room document in ``splitbrain-ops``."""
+    marker = _entry_marker(entry)
     cached_id = str(getattr(state_holder, "_commitments_doc_id", "") or "")
     cached_content = str(getattr(state_holder, "_commitments_content", "") or "")
 
     async with agent.act_in(ops_room_id):
-        doc_id = cached_id
-        existing_content = cached_content
-        if not doc_id:
-            joined = await agent.op("connect_to_room", room_id=ops_room_id)
-            documents = (joined.get("documents") if isinstance(joined, dict) else None) or []
-            doc_id = next(
-                (
-                    str(doc.get("id") or doc.get("document_id") or "")
-                    for doc in documents
-                    if isinstance(doc, dict)
-                    and (doc.get("id") or doc.get("document_id"))
-                    and str(doc.get("name", "")) == CUSTOMER_COMMITMENTS_DOC
-                ),
-                "",
+        joined = await agent.op("connect_to_room", room_id=ops_room_id)
+        documents = (joined.get("documents") if isinstance(joined, dict) else None) or []
+        matching_ids = [
+            str(doc.get("id") or doc.get("document_id") or "")
+            for doc in documents
+            if isinstance(doc, dict)
+            and (doc.get("id") or doc.get("document_id"))
+            and (
+                str(doc.get("name", "")) == CUSTOMER_COMMITMENTS_DOC
+                or str(doc.get("name", "")).startswith(f"{CUSTOMER_COMMITMENTS_DOC} (")
             )
-            if doc_id:
-                loaded = await agent.op("load_internal_documents", ids=[doc_id])
-                items = (
-                    loaded
-                    if isinstance(loaded, list)
-                    else (loaded.get("documents") if isinstance(loaded, dict) else None) or []
-                )
-                existing_content = "\n".join(
-                    str(item.get("content", "")) for item in items if isinstance(item, dict)
-                ).strip()
+        ]
+
+        doc_id = ""
+        existing_content = ""
+        if matching_ids:
+            loaded = await agent.op("load_internal_documents", ids=matching_ids)
+            items = (
+                loaded
+                if isinstance(loaded, list)
+                else (loaded.get("documents") if isinstance(loaded, dict) else None) or []
+            )
+            for idx, item in enumerate(items):
+                if not isinstance(item, dict):
+                    continue
+                item_id = str(item.get("id") or item.get("document_id") or matching_ids[idx])
+                content = str(item.get("content", "")).strip()
+                if marker and marker in content:
+                    if state_holder is not None:
+                        state_holder._commitments_doc_id = item_id
+                        state_holder._commitments_content = content
+                    return item_id, content
+                if not doc_id:
+                    doc_id = item_id
+                    existing_content = content
+            if not doc_id:
+                doc_id = matching_ids[0]
+        elif cached_id:
+            doc_id = cached_id
+            existing_content = cached_content
+            if marker and marker in existing_content:
+                return doc_id, existing_content
 
         if doc_id:
             updated = (
@@ -349,20 +374,34 @@ async def upsert_customer_commitments(
                 if existing_content
                 else (f"{CUSTOMER_COMMITMENTS_DOC}\n\n{entry}")
             )
-            await agent.op(
-                "update_room_document",
-                document_id=doc_id,
-                content=updated,
-            )
-            if state_holder is not None:
-                state_holder._commitments_doc_id = doc_id
-                state_holder._commitments_content = updated
-            return doc_id, updated
+            try:
+                await agent.op(
+                    "update_room_document",
+                    document_id=doc_id,
+                    content=updated,
+                )
+                if state_holder is not None:
+                    state_holder._commitments_doc_id = doc_id
+                    state_holder._commitments_content = updated
+                return doc_id, updated
+            except SwitchOpError as exc:
+                if exc.status != 403:
+                    raise
 
-        initial = f"{CUSTOMER_COMMITMENTS_DOC}\n\n{entry}"
+        writer = getattr(state_holder, "name", None) or getattr(agent, "name", None) or ""
+        doc_name = (
+            f"{CUSTOMER_COMMITMENTS_DOC} ({writer})"
+            if doc_id and writer
+            else CUSTOMER_COMMITMENTS_DOC
+        )
+        initial = (
+            f"{existing_content}\n\n{entry}"
+            if existing_content
+            else f"{CUSTOMER_COMMITMENTS_DOC}\n\n{entry}"
+        )
         created = await agent.op(
             "create_room_document",
-            name=CUSTOMER_COMMITMENTS_DOC,
+            name=doc_name,
             description="Customer commitments and approved decisions across rooms",
             instructions=(
                 "Maintained by the Arbiter. Entries reflect only human-approved decisions; "
@@ -402,9 +441,10 @@ async def record_business_followup(
         state_holder=arbiter,
     )
     if task is not None:
-        verification.record += (
-            f"\nFollow-up: @{task.owner_display} — {task.action} (due {task.due})"
-        )
+        followup_line = f"Follow-up: @{task.owner_display} — {task.action} (due {task.due})"
+        base_record = record_body(verification.record)
+        if followup_line not in base_record:
+            verification.record = f"{base_record}\n{followup_line}"
         task_line = task.format_message()
         assert_can_publish(
             verification.room_name or "conflict-room",
@@ -414,7 +454,19 @@ async def record_business_followup(
             consents=verification.consents,
             approved_decision_text=decision.text,
         )
-        await arbiter.agent.post(verification.room_id or "", task_line)
+        context = await arbiter.agent.op(
+            "read_context",
+            room_id=verification.room_id,
+            limit=CONTEXT_LIMIT,
+            connection=False,
+        )
+        senders = {
+            getattr(arbiter, "name", "splitbrain-arbiter"),
+            "splitbrain-arbiter",
+            "splitbrain-arbiter-b",
+        }
+        if not posted_message(context if isinstance(context, dict) else {}, task_line, senders):
+            await arbiter.agent.post(verification.room_id or "", task_line)
     return task
 
 
@@ -422,6 +474,22 @@ def closing_summary_line(verification: Any, rooms_label: str) -> str:
     """One-line final summary in the conflict room after thread corrections land."""
     customer = customer_for_claims(*verification.claims)
     task: FollowupTask | None = getattr(verification, "followup_task", None)
+    if task is None:
+        machine = getattr(verification, "machine", None)
+        if machine is not None and getattr(machine, "decision", None):
+            candidate = getattr(verification, "candidate", None)
+            task = extract_followup_task(
+                Decision(
+                    candidate_id=(
+                        getattr(candidate, "id", "") or getattr(machine, "conflict_id", "")
+                    ),
+                    room_id=getattr(verification, "room_id", "") or "",
+                    text=machine.decision or "",
+                    proposed_by=machine.proposed_by or "",
+                    confirmed_by=machine.confirmed_by or "",
+                    decided_at=machine.decided_at or "",
+                )
+            )
     if task is not None:
         return (
             f'Corrections posted in {rooms_label}; "{CUSTOMER_COMMITMENTS_DOC}" '

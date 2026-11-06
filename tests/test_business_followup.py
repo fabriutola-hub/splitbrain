@@ -3,23 +3,35 @@
 from __future__ import annotations
 
 from contextlib import asynccontextmanager
+from pathlib import Path
 from typing import Any
 
 import pytest
+from decision_fakes import FakeSwitch
 
 from splitbrain import bootstrap
 from splitbrain.agents import arbiter as arbiter_mod
-from splitbrain.core.decision import DecisionMachine, DecisionOutcome, DecisionState
+from splitbrain.agents.sentinel import Sentinel
+from splitbrain.core.decision import DecisionMachine
+from splitbrain.core.decision_record import (
+    CorrectionJournal,
+    latest_record,
+    load_decision_records,
+    pending_corrections,
+)
 from splitbrain.core.followup import (
     CUSTOMER_COMMITMENTS_DOC,
     customer_for_claims,
     extract_followup_task,
 )
-from splitbrain.core.models import Decision, Evidence
+from splitbrain.core.models import Claim, Decision, Evidence
+from splitbrain.core.packets import encode
 from splitbrain.core.protocol import (
     CandidatePacket,
     ConsentPacket,
     CorrectedPacket,
+    DecidedPacket,
+    OriginRef,
     PacketClaim,
 )
 from splitbrain.core.publication import (
@@ -28,6 +40,8 @@ from splitbrain.core.publication import (
     assert_can_publish,
     public_topic_fields,
 )
+from splitbrain.core.store import ClaimStore
+from splitbrain.switch.events import MessageFrame, MessagePayload
 
 PRIVATE_QUOTE = "Heads up: we're pulling SSO out of Q4. The auth migration has to land first."
 PUBLIC_QUOTE = "Morning! Big one: confirmed with Acme that SSO will be live for them on December 1."
@@ -63,7 +77,7 @@ def _claim(
     )
 
 
-def _make_arbiter(fake_agent: Any) -> arbiter_mod.Arbiter:
+def _make_arbiter(fake_agent: Any, *, name: str = arbiter_mod.AGENT_NAME) -> arbiter_mod.Arbiter:
     state = bootstrap.BootstrapState(
         rooms={
             "splitbrain-ops": bootstrap.RoomState(room_id="r-ops", channel_type="channel_private")
@@ -72,7 +86,7 @@ def _make_arbiter(fake_agent: Any) -> arbiter_mod.Arbiter:
     arb = arbiter_mod.Arbiter(
         agent=fake_agent,
         state=state,
-        name=arbiter_mod.AGENT_NAME,
+        name=name,
         consent_timeout_s=600.0,
         evidence_timeout_s=60.0,
     )
@@ -87,6 +101,7 @@ class FakeSwitchAgent:
         self.targeted_calls: list[dict[str, Any]] = []
         self._active_room = ""
         self.ops_documents: list[dict[str, str]] = []
+        self.conflict_documents: dict[str, dict[str, str]] = {}
 
     @asynccontextmanager
     async def act_in(self, room_id: str):
@@ -99,14 +114,24 @@ class FakeSwitchAgent:
 
     async def op(self, name: str, /, **args: Any) -> Any:
         self.room_ops.append((self._active_room, name, args))
-        if name == "connect_to_room" and self._active_room == "r-ops":
-            return {"documents": list(self.ops_documents)}
+        if name == "connect_to_room":
+            room_id = args.get("room_id") or self._active_room
+            if room_id == "r-ops":
+                return {"documents": list(self.ops_documents)}
+            return {
+                "documents": [
+                    {"id": doc["id"], "name": doc["name"]}
+                    for doc in self.conflict_documents.values()
+                ]
+            }
         if name == "load_internal_documents":
             ids = set(args.get("ids") or [])
-            return [doc for doc in self.ops_documents if doc["id"] in ids]
+            found = [doc for doc in self.ops_documents if doc["id"] in ids]
+            found.extend(doc for doc_id, doc in self.conflict_documents.items() if doc_id in ids)
+            return found
         if name == "create_room_document":
-            doc_id = f"doc-{len(self.ops_documents) + 1}"
             if self._active_room == "r-ops":
+                doc_id = f"doc-{len(self.ops_documents) + 1}"
                 self.ops_documents.append(
                     {
                         "id": doc_id,
@@ -114,12 +139,21 @@ class FakeSwitchAgent:
                         "content": str(args.get("content", "")),
                     }
                 )
+                return {"document_id": doc_id}
+            doc_id = f"doc-conflict-{len(self.conflict_documents) + 1}"
+            self.conflict_documents[doc_id] = {
+                "id": doc_id,
+                "name": str(args.get("name", "")),
+                "content": str(args.get("content", "")),
+            }
             return {"document_id": doc_id}
         if name == "update_room_document":
             doc_id = str(args.get("document_id", ""))
             for doc in self.ops_documents:
                 if doc["id"] == doc_id:
                     doc["content"] = str(args.get("content", ""))
+            if doc_id in self.conflict_documents:
+                self.conflict_documents[doc_id]["content"] = str(args.get("content", ""))
             return {"document_id": doc_id, "status": "ok"}
         return {}
 
@@ -161,7 +195,18 @@ def _sso_verification() -> arbiter_mod.Verification:
     ver.room_name = "conflict-sb-0001-sso"
     ver.document_id = "doc-record-1"
     ver.record = "SB-0001 decision record\n\nStatus: OPEN"
-    ver.machine = DecisionMachine("maria", "tomas")
+    ver.machine = DecisionMachine("maria", "tomas", conflict_id=candidate.id)
+    ver.origins = [
+        OriginRef(
+            room_id=claim.room_id,
+            room_name=claim.room_name,
+            thread_id=claim.thread_root,
+            message_id=claim.message_id,
+            author=claim.author,
+            claim_id=claim.id,
+        )
+        for claim in candidate.claims
+    ]
     ver.evidence = Evidence(
         candidate_id="sb-0001",
         source="github",
@@ -196,14 +241,15 @@ async def test_demo_decision_logs_customer_commitment_and_posts_maria_followup(
     ver = _sso_verification()
     arbiter.verifications[ver.candidate.id] = ver
 
-    outcome = DecisionOutcome(
-        state=DecisionState.DECIDED,
-        reply=None,
-        decision="SSO beta for Acme on December 15, GA in Q1. I'll tell Acme today.",
-        proposed_by="maria",
-        confirmed_by="tomas",
-        decided_at="2026-11-06T14:30:00+00:00",
+    assert ver.machine is not None
+    ver.machine.handle(
+        "maria",
+        "decision: SSO beta for Acme on December 15, GA in Q1. I'll tell Acme today.",
     )
+    outcome = ver.machine.handle("tomas", "confirm")
+    ver.machine.decided_at = "2026-11-06T14:30:00+00:00"
+    ver.machine.confirmations[-1].confirmed_at = "2026-11-06T14:30:00+00:00"
+    outcome = ver.machine._outcome()
     await arbiter._on_decided(ver, outcome)
 
     assert len(fake.ops_documents) == 1
@@ -230,6 +276,19 @@ async def test_demo_decision_logs_customer_commitment_and_posts_maria_followup(
     assert conflict_posts[1] == (
         'Follow-up for @María Gómez: tell Acme (due Nov 6). Logged in "Customer commitments".'
     )
+
+    journal = CorrectionJournal(
+        decided=arbiter._decision_packet(ver),
+        threads=pending_corrections(ver.origins),
+    )
+    for idx, progress in enumerate(journal.threads):
+        progress.status = "posted"
+        progress.message_id = f"sw_corr_{idx}"
+    fake.conflict_documents["doc-journal"] = {
+        "id": "doc-journal",
+        "name": "SB-0001 correction progress",
+        "content": journal.render(),
+    }
 
     await arbiter._on_corrected(
         CorrectedPacket(
@@ -291,17 +350,11 @@ async def test_decision_without_commitment_creates_no_followup_task_and_updates_
     ver.room_name = "conflict-sb-0002-refunds"
     ver.document_id = "doc-record-2"
     ver.record = "SB-0002 decision record\n\nStatus: OPEN"
-    ver.machine = DecisionMachine("lucia", "pablo")
+    ver.machine = DecisionMachine("lucia", "pablo", conflict_id=candidate.id)
     arbiter.verifications[candidate.id] = ver
 
-    outcome = DecisionOutcome(
-        state=DecisionState.DECIDED,
-        reply=None,
-        decision="Refunds above $250 require manager approval.",
-        proposed_by="lucia",
-        confirmed_by="pablo",
-        decided_at="2026-11-06T15:00:00+00:00",
-    )
+    ver.machine.handle("lucia", "decision: Refunds above $250 require manager approval.")
+    outcome = ver.machine.handle("pablo", "confirm")
     await arbiter._on_decided(ver, outcome)
 
     ops_update_calls = [
@@ -534,3 +587,245 @@ def test_public_topic_fields_never_select_private_derived_subject_when_claim_a_i
         confidence=0.91,
     )
     assert public_topic_fields(private_first) == ("SSO", "sso", "Acme", "acme")
+
+
+async def test_publish_decision_twice_creates_single_commitment_entry_and_single_followup_line(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("SPLITBRAIN_TZ", "America/Caracas")
+    fake = FakeSwitch(arbiter_mod.AGENT_NAME)
+    fake.state.add_origin("r-ops", "sw-ops-1")
+    arbiter = _make_arbiter(fake)
+    arbiter.coverage.rooms["r-conflict"] = "conflict-sb-0001-sso"
+
+    ver = _sso_verification()
+    ver.room_id = "r-conflict"
+    ver.document_id = ""
+    ver.record = arbiter._open_record(ver)
+    arbiter.verifications[ver.candidate.id] = ver
+    arbiter.by_room["r-conflict"] = ver.candidate.id
+    await arbiter._save_record(ver)
+
+    assert ver.machine is not None
+    ver.machine.handle(
+        "maria",
+        "decision: SSO beta for Acme on December 15, GA in Q1. I'll tell Acme today.",
+    )
+    outcome = ver.machine.handle("tomas", "confirm")
+    ver.machine.decided_at = "2026-11-06T14:30:00+00:00"
+    ver.machine.confirmations[-1].confirmed_at = "2026-11-06T14:30:00+00:00"
+    outcome = ver.machine._outcome()
+
+    # First run via _on_decided -> _publish_decision
+    await arbiter._on_decided(ver, outcome)
+    assert ver.followup_logged is True
+    assert ver.durable is not None and ver.durable.followup_logged is True
+
+    # Running _publish_decision a second time (and even after simulating a lost flag checkpoint)
+    await arbiter._publish_decision(ver, retry=True)
+    ver.followup_logged = False
+    ver.durable.followup_logged = False
+    await arbiter._publish_decision(ver, retry=True)
+
+    commitments_docs = [
+        doc
+        for doc in fake.state.documents.values()
+        if doc["room_id"] == "r-ops" and doc["name"].startswith(CUSTOMER_COMMITMENTS_DOC)
+    ]
+    assert len(commitments_docs) == 1
+    assert commitments_docs[0]["content"].count("[SB-0001]") == 1
+
+    followup_posts = [
+        post["body"]
+        for post in fake.posts
+        if post["room_id"] == "r-conflict" and post["body"].startswith("Follow-up for @")
+    ]
+    assert followup_posts == [
+        'Follow-up for @María Gómez: tell Acme (due Nov 6). Logged in "Customer commitments".'
+    ]
+
+
+async def test_standby_arbiter_adopting_decided_room_with_followup_logged_does_not_repeat(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("SPLITBRAIN_TZ", "America/Caracas")
+    primary_switch = FakeSwitch(arbiter_mod.AGENT_NAME)
+    primary_switch.state.add_origin("r-ops", "sw-ops-1")
+    primary = _make_arbiter(primary_switch, name=arbiter_mod.AGENT_NAME)
+    primary.coverage.rooms["r-conflict"] = "conflict-sb-0001-sso"
+
+    ver = _sso_verification()
+    ver.room_id = "r-conflict"
+    ver.document_id = ""
+    ver.record = primary._open_record(ver)
+    primary.verifications[ver.candidate.id] = ver
+    primary.by_room["r-conflict"] = ver.candidate.id
+    await primary._save_record(ver)
+
+    assert ver.machine is not None
+    ver.machine.handle(
+        "maria",
+        "decision: SSO beta for Acme on December 15, GA in Q1. I'll tell Acme today.",
+    )
+    ver.machine.handle("tomas", "confirm")
+    ver.machine.decided_at = "2026-11-06T14:30:00+00:00"
+    ver.machine.confirmations[-1].confirmed_at = "2026-11-06T14:30:00+00:00"
+    await primary._on_decided(ver, ver.machine._outcome())
+
+    records, _ = await load_decision_records(primary_switch, "r-conflict", "sb-0001")
+    saved = latest_record(records)
+    assert saved is not None and saved.state is not None
+    assert saved.state.followup_logged is True
+
+    standby_switch = FakeSwitch(arbiter_mod.STANDBY_NAME, primary_switch.state)
+    standby = _make_arbiter(standby_switch, name=arbiter_mod.STANDBY_NAME)
+    standby.is_holder = False
+    await standby._ensure_role()
+
+    adopted = standby.verifications["sb-0001"]
+    assert adopted.decided is True
+    assert adopted.followup_logged is True
+    assert adopted.durable is not None and adopted.durable.followup_logged is True
+    assert adopted.followup_task is not None
+    assert adopted.followup_task.action == "tell Acme"
+    assert not standby_switch.posts
+
+    commitments_docs = [
+        doc
+        for doc in primary_switch.state.documents.values()
+        if doc["room_id"] == "r-ops" and doc["name"].startswith(CUSTOMER_COMMITMENTS_DOC)
+    ]
+    assert len(commitments_docs) == 1
+    assert commitments_docs[0]["content"].count("[SB-0001]") == 1
+
+
+async def test_sentinel_correction_containing_private_derived_value_is_blocked(
+    tmp_path: Path,
+    llm_factory: Any,
+) -> None:
+    switch = FakeSwitch("splitbrain-sentinel")
+    switch.state.add_origin("r-sales", "sw_clm_maria")
+    switch.state.add_origin("r-engineering", "sw_clm_tomas")
+    switch.state.documents["doc-1"] = {
+        "id": "doc-1",
+        "name": "SB-0001 decision record",
+        "room_id": "r-conflict",
+        "owner": arbiter_mod.AGENT_NAME,
+        "content": "SB-0001 decision record\n\nStatus: DECIDED\n",
+    }
+
+    llm, _, _, _ = llm_factory([], mode="live")
+    store = ClaimStore(tmp_path / "sentinel.db")
+    await store.add_claim(
+        Claim(
+            id="clm_maria",
+            room_id="r-sales",
+            room_name="sales",
+            channel_type="channel_public",
+            message_id="sw_clm_maria",
+            author="maria",
+            ts=1793776781000,
+            text=PUBLIC_QUOTE,
+            subject="SSO",
+            subject_key="sso",
+            scope="Acme",
+            scope_key="acme",
+            value="December 1",
+        )
+    )
+    await store.add_claim(
+        Claim(
+            id="clm_tomas",
+            room_id="r-engineering",
+            room_name="engineering",
+            channel_type="channel_private",
+            message_id="sw_clm_tomas",
+            author="tomas",
+            ts=1793776782000,
+            text=PRIVATE_QUOTE,
+            subject="internal auth migration blocker",
+            subject_key="sso",
+            scope="*",
+            scope_key="*",
+            value="removed from Q4 delivery",
+        )
+    )
+
+    sentinel = Sentinel(
+        agent=switch,  # type: ignore[arg-type]
+        llm=llm,
+        store=store,
+        state=bootstrap.BootstrapState(
+            rooms={
+                "splitbrain-ops": bootstrap.RoomState(
+                    room_id="r-ops", channel_type="channel_private"
+                ),
+                "sales": bootstrap.RoomState(room_id="r-sales", channel_type="channel_public"),
+                "engineering": bootstrap.RoomState(
+                    room_id="r-engineering", channel_type="channel_private"
+                ),
+            }
+        ),
+    )
+    try:
+        leaking_packet = DecidedPacket(
+            candidate_id="sb-0001",
+            decision=Decision(
+                candidate_id="sb-0001",
+                room_id="r-conflict",
+                text="SSO beta for Acme on December 15, GA in Q1.",
+                proposed_by="maria",
+                confirmed_by="tomas",
+                decided_at="2026-11-06T14:30:00+00:00",
+            ),
+            conflict_room="r-conflict",
+            conflict_room_name="conflict-sb-0001-sso",
+            origins=[
+                OriginRef(
+                    room_id="r-sales",
+                    room_name="sales",
+                    thread_id="sw_clm_maria",
+                    message_id="sw_clm_maria",
+                    author="maria",
+                    claim_id="clm_maria",
+                ),
+                OriginRef(
+                    room_id="r-engineering",
+                    room_name="engineering",
+                    thread_id="sw_clm_tomas",
+                    message_id="sw_clm_tomas",
+                    author="tomas",
+                    claim_id="clm_tomas",
+                ),
+            ],
+            # Topic leaks the private room's extracted value into the team room update:
+            subject="SSO (removed from Q4 delivery)",
+            subject_key="sso",
+            scope="Acme",
+            scope_key="acme",
+            authors=["maria", "tomas"],
+        )
+        frame = MessageFrame(
+            sequence=10,
+            room_id="r-ops",
+            payload=MessagePayload(
+                sender_name=arbiter_mod.AGENT_NAME,
+                message_id="sw-decided-leak",
+                thread_id="sw-ops-1",
+                body=encode("decided", leaking_packet),
+            ),
+        )
+        with pytest.raises(PublicationPolicyError, match="Derived value"):
+            await sentinel.on_frame(frame)
+        assert switch.posts == []
+        assert "sb-0001" not in sentinel.corrected
+    finally:
+        await sentinel.aclose()
+
+
+def test_arbiter_refuses_to_publish_outside_conflict_and_ops_rooms() -> None:
+    fake = FakeSwitchAgent()
+    arbiter = _make_arbiter(fake)
+    ver = _sso_verification()
+    with pytest.raises(PublicationPolicyError, match="Arbiter cannot publish to #sales"):
+        arbiter._validate_post("r-sales", "Hello #sales", verification=ver, room_name="sales")

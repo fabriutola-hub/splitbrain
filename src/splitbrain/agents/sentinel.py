@@ -11,21 +11,35 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import logging
+import os
 import re
 import time
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
 
+import httpx
+
 from .. import bootstrap
 from ..config import LLMSettings, Settings, SplitbrainError
 from ..core.decision import quoted_sentence
+from ..core.decision_record import (
+    CONTEXT_LIMIT,
+    CorrectionJournal,
+    latest_record,
+    load_correction_journal,
+    load_decision_records,
+    message_id,
+    pending_corrections,
+    posted_message,
+)
 from ..core.matcher import match_report
 from ..core.models import (
     Candidate,
     Claim,
     ClaimKind,
     ClaimStatus,
+    ClassificationResult,
     Evidence,
     Message,
     Relation,
@@ -45,10 +59,11 @@ from ..core.protocol import (
     VerdictPacket,
     read_packet,
 )
-from ..core.store import ClaimStore, pair_id
+from ..core.publication import assert_can_publish, collect_policy_claims
+from ..core.store import ClaimStore, PairState, PairStatus, pair_id
 from ..core.timefmt import short_day
-from ..llm.cassette import CassetteStore
-from ..llm.client import LLMClient
+from ..llm.cassette import CassetteStore, ReplayMiss
+from ..llm.client import LLMClient, LLMResponseError
 from ..switch.client import SwitchAgent
 from ..switch.events import (
     ConnectionStateFrame,
@@ -79,6 +94,55 @@ DB_FILENAME = "sentinel.db"
 ARBITER_NAMES = frozenset({"splitbrain-arbiter", "splitbrain-arbiter-b"})
 GRANT_WORDS = frozenset({"yes", "y", "sí", "si", "s", "ok", "okay", "agree", "de acuerdo"})
 DENY_WORDS = frozenset({"no", "n", "nope", "nah"})
+DEFAULT_MAX_MATCHES_PER_CLAIM = 3
+MAX_CLASSIFICATION_ATTEMPTS = 3
+RETRY_BACKOFF_S = 0.5
+MAX_MATCHES_ENV = "SPLITBRAIN_SENTINEL_MAX_MATCHES"
+TRANSIENT_HTTP_STATUSES = frozenset({429, 500, 502, 503, 504})
+TRANSIENT_ERROR_MARKERS = (
+    "timeout",
+    "timed out",
+    "rate limit",
+    "temporar",
+    "connection reset",
+    "connection refused",
+)
+
+
+def _positive_int_env(name: str, default: int) -> int:
+    raw = os.environ.get(name, "").strip()
+    if not raw:
+        return default
+    try:
+        value = int(raw)
+    except ValueError as exc:
+        raise SplitbrainError(f"{name} must be a positive integer, got {raw!r}.") from exc
+    if value < 1:
+        raise SplitbrainError(f"{name} must be a positive integer, got {raw!r}.")
+    return value
+
+
+def _is_transient_error(exc: BaseException) -> bool:
+    if isinstance(exc, (TimeoutError, httpx.TimeoutException, httpx.TransportError)):
+        return True
+    if isinstance(exc, LLMResponseError):
+        text = str(exc)
+        return any(f"HTTP {status}" in text for status in TRANSIENT_HTTP_STATUSES)
+    text = str(exc).casefold()
+    return any(marker in text for marker in TRANSIENT_ERROR_MARKERS)
+
+
+def _message_from_claim(claim: Claim) -> Message:
+    return Message(
+        message_id=claim.message_id,
+        room_id=claim.room_id,
+        room_name=claim.room_name,
+        channel_type=claim.channel_type,
+        thread_id=claim.thread_id,
+        author=claim.author,
+        ts=claim.ts,
+        text=claim.text,
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -168,9 +232,18 @@ class Sentinel:
         tui: SentinelTui | None = None,
         batch_size: int = BATCH_SIZE,
         batch_window_s: float = BATCH_WINDOW_S,
+        max_matches_per_claim: int = DEFAULT_MAX_MATCHES_PER_CLAIM,
+        max_classification_attempts: int = MAX_CLASSIFICATION_ATTEMPTS,
+        retry_backoff_s: float = RETRY_BACKOFF_S,
     ) -> None:
         if OPS_ROOM not in state.rooms:
             raise SplitbrainError("splitbrain-ops is missing from .splitbrain/state.json")
+        if max_matches_per_claim < 1:
+            raise ValueError("max_matches_per_claim must be >= 1")
+        if max_classification_attempts < 1:
+            raise ValueError("max_classification_attempts must be >= 1")
+        if retry_backoff_s < 0:
+            raise ValueError("retry_backoff_s must be >= 0")
         self.agent = agent
         self.llm = llm
         self.brain = Brain(llm)
@@ -188,6 +261,9 @@ class Sentinel:
         self.worker: asyncio.Task[None] | None = None
         self.batch_size = batch_size
         self.batch_window_s = batch_window_s
+        self.max_matches_per_claim = max_matches_per_claim
+        self.max_classification_attempts = max_classification_attempts
+        self.retry_backoff_s = retry_backoff_s
         self.messages_processed = 0
         self.candidates_sent = 0
         self.consent_pending: dict[tuple[str, str], ConsentPending] = {}
@@ -199,6 +275,7 @@ class Sentinel:
         self._noted_conflict_rooms: set[str] = set()
 
     async def start(self) -> None:
+        await self._recover_pairs()
         self.worker = asyncio.create_task(self._extraction_loop(), name="sentinel-extraction")
         logger.info("Sentinel ready; ops room %s", self.ops_room_id[:8])
 
@@ -464,50 +541,272 @@ class Sentinel:
                 message.room_name,
                 ", ".join(f"{c.subject_key}/{c.scope_key}={c.value}" for c in claims) or "none",
             )
-            stored = await self.store.active_claims()
             for new_claim in claims:
-                # match_report places DECISION claims first so recorded human
-                # decisions always take priority over ordinary stored claims.
+                # Persist the claim before its pairs so a restart can resume them.
+                await self.store.add_claim(new_claim)
+                stored = await self.store.active_claims()
                 report = match_report(new_claim, stored)
-                if not report.matches:
-                    continue
-                other = report.matches[0]
-                identifier = pair_id(other, new_claim)
-                if await self.store.has_pair(identifier):
-                    logger.debug("Pair already seen; not re-surfacing it")
-                    continue
-                await self.store.mark_pair(identifier)
-                classification = await self.brain.classifier.classify(other, new_claim)
-                if not (
-                    classification.relation == Relation.CONTRADICTION
-                    and classification.confidence >= CANDIDATE_THRESHOLD
-                ):
-                    # Silence: no team room post, no ops post, just a log line.
-                    logger.info(
-                        "No alert: %s (confidence %.2f): %s",
-                        classification.relation,
-                        classification.confidence,
-                        classification.reason,
-                    )
-                    continue
-                if other.kind == ClaimKind.DECISION:
-                    new_claim.status = ClaimStatus.SUPERSEDED
-                    await self._remind(message, other)
-                    continue
-                candidate = Candidate(
-                    id=self._candidate_id(other, new_claim),
-                    claim_a=other,
-                    claim_b=new_claim,
-                    confidence=classification.confidence,
-                    reason=classification.reason,
-                    created_at=datetime.now(UTC).isoformat(timespec="seconds"),
-                )
-                await self.store.add_candidate(candidate)
-                await self._publish(candidate)
-            for claim in claims:
-                await self.store.add_claim(claim)
+                selected = await self._select_matches(new_claim, report.matches)
+                for other in selected:
+                    identifier = pair_id(other, new_claim)
+                    await self.store.ensure_pair(identifier, new_claim.id, other.id)
+                    await self._process_pair(identifier, other, new_claim)
+                await self._finalize_claim(new_claim)
             await self.store.mark_processed(message.message_id)
             self.messages_processed += 1
+
+    async def _recover_pairs(self) -> None:
+        interrupted = await self.store.recover_interrupted_pairs()
+        if interrupted:
+            logger.warning("Recovered %d interrupted pair classification(s)", interrupted)
+        await self.resume_pairs()
+        await self.finalize_unfinalized_claims()
+
+    async def resume_pairs(self) -> int:
+        """Retry pending/failed pairs left by a previous process."""
+        resumed = 0
+        for state in await self.store.resumable_pairs(self.max_classification_attempts):
+            if not state.new_claim_id or not state.other_claim_id:
+                continue
+            new_claim = await self.store.claim_by_id(state.new_claim_id)
+            other = await self.store.claim_by_id(state.other_claim_id)
+            if new_claim is None or other is None:
+                await self.store.mark_pair_failed(
+                    state.pair_id, "a claim needed to resume is missing", retryable=False
+                )
+                logger.error("Cannot resume pair %s: a claim is missing", state.pair_id)
+                continue
+            await self._process_pair(state.pair_id, other, new_claim)
+            await self._finalize_claim(new_claim)
+            resumed += 1
+        if resumed:
+            logger.info("Resumed %d pair classification(s)", resumed)
+        return resumed
+
+    async def finalize_unfinalized_claims(self) -> int:
+        """Finish claims whose pairs completed just before a restart."""
+        finalized = 0
+        for claim_id in await self.store.unfinalized_claim_ids():
+            claim = await self.store.claim_by_id(claim_id)
+            if claim is not None and await self._finalize_claim(claim):
+                finalized += 1
+        return finalized
+
+    async def _select_matches(self, new_claim: Claim, matches: list[Claim]) -> list[Claim]:
+        selected: list[Claim] = []
+        for other in matches:
+            identifier = pair_id(other, new_claim)
+            state = await self.store.pair_state(identifier)
+            if state is not None:
+                if state.new_claim_id is None or state.new_claim_id != new_claim.id:
+                    # The pair belongs to the other claim's ingestion; do not
+                    # classify it twice from both directions.
+                    continue
+                if state.status in (PairStatus.DONE, PairStatus.CLASSIFYING):
+                    continue
+                if state.status is PairStatus.FAILED and (
+                    not state.retryable or state.attempts >= self.max_classification_attempts
+                ):
+                    continue
+            selected.append(other)
+            if len(selected) >= self.max_matches_per_claim:
+                break
+        if len(selected) >= self.max_matches_per_claim and len(matches) > len(selected):
+            logger.info(
+                "Matched %d claim(s) for %s; classifying the first %d",
+                len(matches),
+                new_claim.subject_key,
+                len(selected),
+            )
+        return selected
+
+    async def _process_pair(
+        self, identifier: str, other: Claim, new_claim: Claim
+    ) -> ClassificationResult | None:
+        state = await self.store.begin_pair(identifier, self.max_classification_attempts)
+        if state is None:
+            return None
+        while True:
+            try:
+                result = await self.brain.classifier.classify(other, new_claim)
+            except ReplayMiss:
+                # A missing cassette is a deployment error, not a transient one.
+                await self.store.mark_pair_failed(
+                    identifier, "replay miss: no recorded classification", retryable=False
+                )
+                raise
+            except Exception as exc:
+                transient = _is_transient_error(exc)
+                await self.store.mark_pair_failed(identifier, str(exc), retryable=transient)
+                if transient and state.attempts < self.max_classification_attempts:
+                    delay = self.retry_backoff_s * (2 ** (state.attempts - 1))
+                    logger.warning(
+                        "Classification attempt %d/%d failed for pair %s: %s; retrying in %.1fs",
+                        state.attempts,
+                        self.max_classification_attempts,
+                        identifier,
+                        exc,
+                        delay,
+                    )
+                    if delay > 0:
+                        await asyncio.sleep(delay)
+                    state = await self.store.begin_pair(
+                        identifier, self.max_classification_attempts
+                    )
+                    if state is None:
+                        return None
+                    continue
+                logger.error(
+                    "Classification failed for pair %s after %d attempt(s): %s",
+                    identifier,
+                    state.attempts,
+                    exc,
+                    exc_info=not transient,
+                )
+                if not transient:
+                    raise
+                return None
+            await self.store.mark_pair_done(identifier, result.model_dump(mode="json"))
+            return result
+
+    async def _finalize_claim(self, new_claim: Claim) -> bool:
+        """Pick one action from all completed pairs of a claim, exactly once."""
+        states = await self.store.pairs_for_new_claim(new_claim.id)
+        if not states or all(state.finalized_at is not None for state in states):
+            return False
+        if any(self._pair_needs_retry(state) for state in states):
+            return False
+
+        results: list[tuple[PairState, ClassificationResult]] = []
+        for state in states:
+            if state.status is not PairStatus.DONE or state.result is None:
+                continue
+            try:
+                results.append((state, ClassificationResult.model_validate(state.result)))
+            except ValueError:
+                logger.error("Pair %s has an unreadable classification result", state.pair_id)
+
+        if not results:
+            logger.info("No alert: no completed classification for %s", new_claim.subject_key)
+            await self.store.mark_pairs_finalized(new_claim.id)
+            return True
+
+        contradictions = [
+            (state, result)
+            for state, result in results
+            if result.relation == Relation.CONTRADICTION
+            and result.confidence >= CANDIDATE_THRESHOLD
+        ]
+        best = await self._best_contradiction(contradictions)
+        if best is None:
+            for index, (state, result) in enumerate(results):
+                other = await self.store.claim_by_id(state.other_claim_id or "")
+                if index == 0:
+                    logger.info(
+                        "No alert: %s (confidence %.2f): %s",
+                        result.relation,
+                        result.confidence,
+                        result.reason,
+                    )
+                else:
+                    logger.info(
+                        "Also matched %s: %s (%.2f)",
+                        self._match_label(other),
+                        result.relation,
+                        result.confidence,
+                    )
+            await self.store.mark_pairs_finalized(new_claim.id)
+            return True
+
+        state, result = best
+        other = await self.store.claim_by_id(state.other_claim_id or "")
+        if other is None:
+            logger.error("Cannot finalize %s: the matched claim is missing", new_claim.id)
+            await self.store.mark_pairs_finalized(new_claim.id)
+            return True
+
+        if other.kind == ClaimKind.DECISION:
+            if state.candidate_id != "reminded":
+                new_claim.status = ClaimStatus.SUPERSEDED
+                await self.store.set_status(new_claim.id, ClaimStatus.SUPERSEDED)
+                await self._remind(_message_from_claim(new_claim), other)
+                await self.store.mark_pair_action(state.pair_id, "reminded")
+            logger.info("No alert: contradiction with recorded decision %s", other.id)
+        else:
+            candidate = Candidate(
+                id=self._candidate_id(other, new_claim),
+                claim_a=other,
+                claim_b=new_claim,
+                confidence=result.confidence,
+                reason=result.reason,
+                created_at=datetime.now(UTC).isoformat(timespec="seconds"),
+            )
+            await self.store.add_candidate(candidate)
+            if not await self.store.is_candidate_published(candidate.id):
+                await self._publish(candidate)
+                await self.store.mark_candidate_published(candidate.id)
+            await self.store.mark_pair_action(state.pair_id, candidate.id)
+            logger.info(
+                "Candidate %s selected from %d classified match(es)",
+                candidate.id,
+                len(results),
+            )
+
+        for other_state, other_result in results:
+            if other_state.pair_id == state.pair_id:
+                continue
+            other_claim = await self.store.claim_by_id(other_state.other_claim_id or "")
+            logger.info(
+                "Also matched %s: %s (%.2f)",
+                self._match_label(other_claim),
+                other_result.relation,
+                other_result.confidence,
+            )
+        for failed in states:
+            if failed.status is PairStatus.FAILED:
+                logger.error(
+                    "Pair %s failed after %d attempt(s): %s",
+                    failed.pair_id,
+                    failed.attempts,
+                    failed.error,
+                )
+        await self.store.mark_pairs_finalized(new_claim.id)
+        return True
+
+    def _pair_needs_retry(self, state: PairState) -> bool:
+        if state.status in (PairStatus.PENDING, PairStatus.CLASSIFYING):
+            return True
+        return (
+            state.status is PairStatus.FAILED
+            and state.retryable
+            and state.attempts < self.max_classification_attempts
+        )
+
+    async def _best_contradiction(
+        self, contradictions: list[tuple[PairState, ClassificationResult]]
+    ) -> tuple[PairState, ClassificationResult] | None:
+        if not contradictions:
+            return None
+        decisions: list[tuple[PairState, ClassificationResult, Claim]] = []
+        ordinary: list[tuple[PairState, ClassificationResult, Claim]] = []
+        for state, result in contradictions:
+            other = await self.store.claim_by_id(state.other_claim_id or "")
+            if other is None:
+                continue
+            bucket = decisions if other.kind == ClaimKind.DECISION else ordinary
+            bucket.append((state, result, other))
+        pool = decisions or ordinary
+        if not pool:
+            return None
+        pool.sort(key=lambda item: (-item[1].confidence, -item[2].ts, item[0].pair_id))
+        state, result, _ = pool[0]
+        return state, result
+
+    @staticmethod
+    def _match_label(claim: Claim | None) -> str:
+        if claim is None:
+            return "an unknown claim"
+        return f"#{claim.room_name} {claim.author} ({claim.subject})"
 
     # ── Consent, corrections, reminders and the link fallback ───────────────
 
@@ -627,9 +926,48 @@ class Sentinel:
         return True
 
     async def _apply_corrections(self, frame: MessageFrame, decided: DecidedPacket) -> None:
+        locks = getattr(self, "_correction_locks", None)
+        if locks is None:
+            locks = self._correction_locks = {}
+        async with locks.setdefault(decided.candidate_id, asyncio.Lock()):
+            await self._resume_corrections(frame, decided)
+
+    async def _save_corrections(self, document_id: str, journal: CorrectionJournal) -> str:
+        async with self.agent.act_in(journal.decided.conflict_room):
+            if document_id:
+                await self.agent.op(
+                    "update_room_document", document_id=document_id, content=journal.render()
+                )
+                return document_id
+            result = await self.agent.op(
+                "create_room_document",
+                name=f"{journal.decided.candidate_id.upper()} correction progress",
+                description="Per-thread delivery receipts for the human decision",
+                instructions="Only the Sentinel edits delivery progress; never alter the decision.",
+                content=journal.render(),
+            )
+            return str(result["document_id"])
+
+    async def _resume_corrections(self, frame: MessageFrame, decided: DecidedPacket) -> None:
         if decided.candidate_id in self.corrected:
             return
-        self.corrected.add(decided.candidate_id)
+        # This reader is shared with decision-memory reminders: both must see
+        # the newest holder's record, rather than an older owner's OPEN copy.
+        record = await self._read_decision_record(decision_claim_for(decided), decided.candidate_id)
+        if record is None:
+            raise SplitbrainError(f"Cannot correct {decided.candidate_id} without its final record")
+        document_id, journal = await load_correction_journal(
+            self.agent, decided.conflict_room, decided.candidate_id
+        )
+        if journal is None:
+            journal = CorrectionJournal(
+                decided=decided, threads=pending_corrections(decided.origins)
+            )
+            if not journal.threads:
+                raise SplitbrainError("A correction needs at least one original thread")
+            document_id = await self._save_corrections(document_id, journal)
+        elif journal.decided != decided:
+            raise SplitbrainError("Correction retry disagrees with the persisted human decision")
         self.decision_authors[decided.candidate_id] = list(decided.authors)
         self.ops_threads[decided.candidate_id] = reply_thread(frame)
         if self.tui is not None:
@@ -648,11 +986,43 @@ class Sentinel:
             f"#{decided.conflict_room_name}. Decision: {quoted_sentence(decided.decision.text)} "
             "Please use this from now on."
         )
+        policy_claims, policy_reason = await collect_policy_claims(
+            self.store, decided.candidate_id, record=record, origins=decided.origins
+        )
+        for progress in journal.threads:
+            assert_can_publish(
+                progress.room_name,
+                body,
+                private_claims=policy_claims,
+                public_claims=policy_claims,
+                classifier_reason=policy_reason,
+                approved_decision_text=decided.decision.text,
+            )
+            if progress.status == "posted":
+                continue
+            context = await self.agent.op(
+                "read_context", room_id=progress.room_id, limit=CONTEXT_LIMIT, connection=False
+            )
+            receipt = posted_message(context, body, {AGENT_NAME}, thread_id=progress.thread_id)
+            if not receipt:
+                if not any(
+                    message_id(thread.get("root") or {}) == progress.thread_id
+                    for thread in context.get("threads", [])
+                ):
+                    raise SplitbrainError(
+                        f"Origin thread {progress.thread_id} is outside Switch context; "
+                        "refusing a correction whose previous delivery cannot be checked"
+                    )
+                result = await self.agent.post(progress.room_id, body, thread_id=progress.thread_id)
+                receipt = message_id(result)
+                if not receipt:
+                    raise SplitbrainError("Correction publication returned no message id")
+            progress.status = "posted"
+            progress.message_id = receipt
+            await self._save_corrections(document_id, journal)
         for origin in decided.origins:
             await self.store.set_status(origin.claim_id, ClaimStatus.RESOLVED)
         await self.store.add_claim(decision_claim_for(decided))
-        for origin in decided.origins:
-            await self.agent.post(origin.room_id, body, thread_id=origin.thread_id)
         rooms = [f"#{origin.room_name}" for origin in decided.origins]
         packet = CorrectedPacket(
             candidate_id=decided.candidate_id,
@@ -660,13 +1030,24 @@ class Sentinel:
             conflict_room_name=decided.conflict_room_name,
             rooms=[origin.room_name for origin in decided.origins],
         )
-        await self.agent.targeted(
-            self.ops_room_id,
-            f"Corrections posted in {', '.join(rooms)} for {decided.candidate_id.upper()}.\n"
-            + encode("corrected", packet),
-            target_roles=["arbiter"],
-            thread_id=reply_thread(frame),
-        )
+        if not journal.notified:
+            notification = (
+                f"Corrections posted in {', '.join(rooms)} for {decided.candidate_id.upper()}.\n"
+                + encode("corrected", packet)
+            )
+            context = await self.agent.op(
+                "read_context", room_id=self.ops_room_id, limit=CONTEXT_LIMIT, connection=False
+            )
+            if not posted_message(context, notification, {AGENT_NAME}):
+                await self.agent.targeted(
+                    self.ops_room_id,
+                    notification,
+                    target_roles=["arbiter"],
+                    thread_id=reply_thread(frame),
+                )
+            journal.notified = True
+            await self._save_corrections(document_id, journal)
+        self.corrected.add(decided.candidate_id)
         if self.tui is not None:
             self.tui.add_step(
                 decided.candidate_id,
@@ -685,38 +1066,8 @@ class Sentinel:
     async def _read_decision_record(self, decision: Claim, candidate_id: str) -> str | None:
         """Read the conflict room document from Switch and confirm Status: DECIDED."""
         try:
-            async with self.agent.act_in(decision.room_id):
-                joined = await self.agent.op("connect_to_room", room_id=decision.room_id)
-                documents = (joined.get("documents") if isinstance(joined, dict) else None) or []
-                expected = f"{candidate_id.upper()} decision record"
-                document_id = next(
-                    (
-                        str(doc["id"])
-                        for doc in documents
-                        if isinstance(doc, dict)
-                        and doc.get("id")
-                        and str(doc.get("name", "")) == expected
-                    ),
-                    None,
-                )
-                if document_id is None:
-                    document_id = next(
-                        (
-                            str(doc["id"])
-                            for doc in documents
-                            if isinstance(doc, dict) and doc.get("id")
-                        ),
-                        None,
-                    )
-                if document_id is None:
-                    logger.error(
-                        "Cannot verify decision %s in #%s: no room document found; "
-                        "refusing to post reminder",
-                        candidate_id,
-                        decision.room_name,
-                    )
-                    return None
-                loaded = await self.agent.op("load_internal_documents", ids=[document_id])
+            records, _ = await load_decision_records(self.agent, decision.room_id, candidate_id)
+            selected = latest_record(records)
         except Exception:
             logger.error(
                 "Failed to read decision record for %s in #%s; refusing to post reminder",
@@ -725,14 +1076,10 @@ class Sentinel:
                 exc_info=True,
             )
             return None
-        entries = (
-            loaded
-            if isinstance(loaded, list)
-            else (loaded.get("documents") if isinstance(loaded, dict) else None) or []
-        )
-        content = "\n".join(
-            str(item.get("content", "")) for item in entries if isinstance(item, dict)
-        )
+        if selected is None:
+            logger.error("Cannot verify decision %s: no room document found", candidate_id)
+            return None
+        content = selected.content
         if "Status: DECIDED" not in content:
             logger.error(
                 "Decision record for %s in #%s does not have 'Status: DECIDED'; "
@@ -779,6 +1126,17 @@ class Sentinel:
             f"Heads-up: this was already decided. On {short_day(decision.ts)}, "
             f"{authors} agreed: {quoted_sentence(decision.text)} "
             f"(decision record in #{decision.room_name}). Please use that instead."
+        )
+        policy_claims, policy_reason = await collect_policy_claims(
+            self.store, candidate_id, record=record
+        )
+        assert_can_publish(
+            message.room_name,
+            body,
+            private_claims=policy_claims,
+            public_claims=policy_claims,
+            classifier_reason=policy_reason,
+            approved_decision_text=decision.text,
         )
         await self.agent.post(message.room_id, body, thread_id=thread_root)
         person = _person(message.author)
@@ -968,7 +1326,14 @@ def build_runtime(
         view.start()
 
     agent = SwitchAgent(settings.api_base_url, credentials.agent_id, credentials.api_key)
-    sentinel = Sentinel(agent=agent, llm=llm, store=store, state=state, tui=view)
+    sentinel = Sentinel(
+        agent=agent,
+        llm=llm,
+        store=store,
+        state=state,
+        tui=view,
+        max_matches_per_claim=_positive_int_env(MAX_MATCHES_ENV, DEFAULT_MAX_MATCHES_PER_CLAIM),
+    )
     return AgentRuntime(
         agent=agent, processor=sentinel, name=AGENT_NAME, llm=llm_settings, stop=stop
     )

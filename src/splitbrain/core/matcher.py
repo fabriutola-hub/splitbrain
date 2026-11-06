@@ -58,7 +58,15 @@ def match_report(
             reasons.append("different scope")
             continue
         matches.append(other)
-    matches.sort(key=lambda item: 0 if item.kind == ClaimKind.DECISION else 1)
+    # Recorded decisions first, then the most recent claim, then id for a stable
+    # order across SQLite row orderings.
+    matches.sort(
+        key=lambda item: (
+            0 if item.kind == ClaimKind.DECISION else 1,
+            -item.ts,
+            item.id,
+        )
+    )
     return MatchReport(matches=matches, skip_reasons=tuple(sorted(set(reasons))))
 
 

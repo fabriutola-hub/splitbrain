@@ -45,6 +45,7 @@ class FakeAgent:
             "Decision protocol: only @maria and @tomas can close this conflict."
         )
         self.fail_document_read = False
+        self.documents: dict[str, dict[str, str]] = {}
 
     async def op(self, name: str, /, **args: Any) -> Any:
         self.ops.append((name, args))
@@ -59,21 +60,43 @@ class FakeAgent:
         if name == "connect_to_room":
             if self.fail_document_read:
                 raise RuntimeError("Switch document service unavailable")
-            if self.decision_record is None:
-                return {"documents": []}
-            return {"documents": [{"id": "doc-1", "name": "SB-0001 decision record"}]}
+            documents = list(self.documents.values())
+            if self.decision_record is not None:
+                documents = [{"id": "doc-1", "name": "SB-0001 decision record"}, *documents]
+            return {"documents": documents}
         if name == "load_internal_documents":
             if self.fail_document_read:
                 raise RuntimeError("Switch document service unavailable")
-            if self.decision_record is None:
-                return []
-            return [
-                {
+            documents = dict(self.documents)
+            if self.decision_record is not None:
+                documents["doc-1"] = {
                     "id": "doc-1",
                     "name": "SB-0001 decision record",
                     "content": self.decision_record,
                 }
-            ]
+            return [documents[key] for key in args["ids"] if key in documents]
+        if name == "create_room_document":
+            ident = f"doc-extra-{len(self.documents)}"
+            self.documents[ident] = {"id": ident, "name": args["name"], "content": args["content"]}
+            return {"document_id": ident}
+        if name == "update_room_document":
+            self.documents[args["document_id"]]["content"] = args["content"]
+            return {}
+        if name == "read_context":
+            roots = {SALES: "sw_clm_maria", ENGINEERING: "sw_clm_tomas"}
+            root_id = roots.get(args["room_id"], "sw-root")
+            return {
+                "threads": [
+                    {
+                        "root": {"id": root_id},
+                        "replies": [
+                            {"id": f"sw_fake_{index}", "sender_name": mod.AGENT_NAME, **post}
+                            for index, post in enumerate(self.posts)
+                            if post["room_id"] == args["room_id"]
+                        ],
+                    }
+                ]
+            }
         return {}
 
     @asynccontextmanager

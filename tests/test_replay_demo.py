@@ -41,7 +41,7 @@ class Sink:
 
     async def op(self, name: str, /, **kwargs: Any) -> Any:
         if name == "connect_to_room":
-            return {"documents": [{"id": "doc-1"}]}
+            return {"documents": [{"id": "doc-1", "name": "SB-0001 decision record"}]}
         if name == "load_internal_documents":
             return [
                 {
