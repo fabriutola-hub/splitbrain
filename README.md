@@ -4,6 +4,20 @@
 
 **Splitbrain is a set of agents on Switch that notices when two teams believe incompatible things, verifies it against independent evidence, and brings the two responsible people into one room to decide — before the mistake reaches a customer.**
 
+## For judges
+
+A two-minute path through the project:
+
+| | |
+| --- | --- |
+| **Watch** | [Demo video, 2:30](https://youtu.be/oSs8K3sGL0U): a real run on Mattermost + Switch 0.31, with English and Spanish captions. |
+| **Run** | `git clone https://github.com/fabriutola-hub/splitbrain.git && cd splitbrain && uv sync && uv run splitbrain demo --auto-decide`. Needs Docker and `uv`; no API key and no accounts (the model answers are replayed from `cassettes/`). The first run downloads the Switch and Mattermost images; then the whole story plays on its own and ends with a `DEMO SUMMARY` and exit code 0. Add `--followup` to also see the decision memory. |
+| **See it in chat** | Open http://localhost:8065 and log in as `maria` or `tomas` with the password printed in the `DEMO SUMMARY`, which also links to the private conflict room. |
+| **How Switch is used** | [Every Switch feature and the file that uses it](#how-splitbrain-uses-switch): the event stream, agent-created private rooms, an exclusive role with a standby, room documents as the decision record, `link_rooms`, a GitHub reference and one YAML template. Without Switch there is no transport and no shared state. |
+| **What we found in Switch** | [A reproducible race in the exclusive role lease](#what-we-found-in-switch-0310), plus four protocol details that cost us time. |
+| **Does it work** | 406 unit tests, 4 integration tests against a live stack, and a [44-pair evaluation](#evaluation) (precision 1.00, recall 0.89) with its errors listed. |
+| **Honest limits** | [Known limits](#known-limits): tested on Windows 11 and on Mattermost only. |
+
 Sales promises Acme that SSO will be live on December 1, in a public channel. Engineering pulls SSO out of Q4, in a private channel. Nobody is a member of both rooms, so nobody sees both statements. The Sentinel is: it listens to every room over a `scope=all&filter=all` event stream, records both claims, and the other two agents convene the only people who can resolve the difference.
 
 ![Splitbrain opens a private room for the two people who disagree](docs/assets/demo.gif)
