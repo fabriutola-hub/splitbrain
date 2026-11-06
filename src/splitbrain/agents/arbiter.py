@@ -526,6 +526,14 @@ class Arbiter:
                 f"Verdict for {evidence.candidate_id.upper()}: DISCARDED. "
                 f"Evidence was inconclusive: {detail}. Nobody is contacted."
             )
+        elif evidence.status == "unavailable":
+            detail = (evidence.summary or reason).rstrip(".")
+            if detail.casefold().startswith("evidence unavailable:"):
+                detail = detail.split(":", 1)[1].strip()
+            readable = (
+                f"Verdict for {evidence.candidate_id.upper()}: DISCARDED. "
+                f"Evidence unavailable: {detail}. Nobody is contacted."
+            )
         else:
             readable = (
                 f"Verdict for {evidence.candidate_id.upper()}: {verification.verdict.upper()}. "

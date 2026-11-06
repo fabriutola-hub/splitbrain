@@ -168,7 +168,14 @@ class EvidenceItem(BaseModel):
     updated_at: str = ""
 
 
-EvidenceStatus = Literal["supports_a", "supports_b", "conflicting", "inconclusive", "none"]
+EvidenceStatus = Literal[
+    "supports_a",
+    "supports_b",
+    "conflicting",
+    "inconclusive",
+    "none",
+    "unavailable",
+]
 
 
 class Evidence(BaseModel):
