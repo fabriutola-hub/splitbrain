@@ -181,13 +181,26 @@ def build_parser() -> argparse.ArgumentParser:
             "need an API key; falls back to SPLITBRAIN_LLM_MODE when set"
         ),
     )
+    eval_parser.add_argument(
+        "--dataset",
+        default=None,
+        metavar="PATH",
+        help=(
+            "run an alternative JSONL dataset (for example eval/dataset-v2.jsonl); "
+            "results go to eval/results-<suffix>.md or eval/results-<suffix>-live.md. "
+            "Without it the command uses eval/dataset.jsonl exactly as before"
+        ),
+    )
     return parser
 
 
 async def _dispatch(args: argparse.Namespace) -> int:
     # These two are Switch-free: they must work on a clean clone with no .env.
     if args.command == "eval":
-        await evaluation.run(args.mode)
+        if args.dataset:
+            await evaluation.run(args.mode, dataset=args.dataset)
+        else:
+            await evaluation.run(args.mode)
         return 0
     if args.command == "record":
         if args.missing:

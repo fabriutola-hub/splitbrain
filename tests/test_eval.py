@@ -9,23 +9,28 @@ from typing import Any
 
 import pytest
 
+from splitbrain import cli, evaluation
 from splitbrain.config import LLMSettings, SplitbrainError
 from splitbrain.core.models import EvalPair, EvalSide, Relation
 from splitbrain.core.pipeline import PairResult
 from splitbrain.evaluation import (
     LABELS,
+    EvalPairV2,
     build_live_run_record,
     compute_metrics,
     load_dataset,
+    load_dataset_v2,
     load_live_runs,
     render_live_markdown,
     render_markdown,
+    resolve_dataset,
     resolve_mode,
     run,
 )
 from splitbrain.llm.client import LLMCallStats
 
 DATASET = Path(__file__).resolve().parents[1] / "eval" / "dataset.jsonl"
+V2_DATASET = Path(__file__).resolve().parents[1] / "eval" / "dataset-v2.jsonl"
 
 
 def _result(identifier: str, label: str, predicted: str) -> PairResult:
@@ -304,3 +309,213 @@ def test_render_live_markdown_notes_when_tokens_not_returned(
     assert "not returned by API" in text
     assert "#### 1 — label `contradiction`, predicted `unrelated`" in text
     assert "secret-live-key" not in text
+
+
+def test_dataset_v2_contract_and_distribution() -> None:
+    pairs = load_dataset_v2(V2_DATASET)
+    assert len(pairs) == 100
+    labels = Counter(str(pair.label) for pair in pairs)
+    assert labels == Counter({"contradiction": 35, "update": 15, "compatible": 25, "unrelated": 25})
+    langs = Counter(pair.lang for pair in pairs)
+    assert langs == Counter({"en": 70, "es": 18, "mixed": 12})
+    assert len({pair.id for pair in pairs}) == 100
+    assert all(isinstance(pair, EvalPair) for pair in pairs)
+    for pair in pairs:
+        assert pair.lang in ("en", "es", "mixed")
+        assert pair.tags and all(isinstance(tag, str) and tag.strip() for tag in pair.tags)
+        assert pair.note
+        assert pair.a.room != pair.b.room
+        for side in (pair.a, pair.b):
+            assert len(side.text.split()) >= 5
+    lines = [line for line in V2_DATASET.read_text(encoding="utf-8").splitlines() if line.strip()]
+    assert len(lines) == 100
+    for line in lines:
+        assert set(json.loads(line)) == {"id", "a", "b", "label", "note", "lang", "tags"}
+    text = V2_DATASET.read_text(encoding="utf-8").casefold()
+    for forbidden in ("acme", "globex", "sso", "refund", "99.9", "99.5"):
+        assert forbidden not in text
+
+
+def test_load_dataset_v2_parses_lang_and_tags() -> None:
+    pairs = load_dataset_v2(V2_DATASET)
+    by_id = {pair.id: pair for pair in pairs}
+    assert by_id["v001"].lang == "en"
+    assert by_id["v001"].tags == ["pricing", "currency", "relative-date"]
+    assert by_id["v005"].lang == "es"
+    assert by_id["v010"].lang == "mixed"
+    assert str(by_id["v010"].label) == "contradiction"
+    assert sum("question" in pair.tags for pair in pairs) >= 6
+    assert sum("hypothetical" in pair.tags for pair in pairs) >= 6
+    assert sum("own-correction" in pair.tags for pair in pairs) >= 8
+    assert sum("authorized-exception" in pair.tags for pair in pairs) >= 6
+    assert sum("beta-ga" in pair.tags for pair in pairs) >= 8
+    assert sum("relative-date" in pair.tags for pair in pairs) >= 8
+    assert (
+        sum("different-customer" in pair.tags or "different-region" in pair.tags for pair in pairs)
+        >= 6
+    )
+
+
+def test_load_dataset_v2_fails_loudly(tmp_path: Path) -> None:
+    with pytest.raises(SplitbrainError, match="missing"):
+        load_dataset_v2(tmp_path / "nope.jsonl")
+    good = {
+        "id": "x1",
+        "a": {"room": "pricing", "author": "nadia", "text": "The surcharge is 40 USD from Monday."},
+        "b": {"room": "billing", "author": "ravi", "text": "The surcharge is 40 EUR from Monday."},
+        "label": "contradiction",
+        "note": "currency mismatch",
+        "lang": "en",
+        "tags": ["currency"],
+    }
+    variants = [
+        {key: value for key, value in good.items() if key != "lang"},
+        {**good, "lang": "fr"},
+        {**good, "tags": []},
+        {**good, "tags": ["currency", " "]},
+        {**good, "extra": 1},
+    ]
+    for index, payload in enumerate(variants):
+        path = tmp_path / f"bad{index}.jsonl"
+        path.write_text(json.dumps(payload) + "\n", encoding="utf-8")
+        with pytest.raises(SplitbrainError, match="bad"):
+            load_dataset_v2(path)
+    duplicate = tmp_path / "duplicate.jsonl"
+    duplicate.write_text(json.dumps(good) + "\n" + json.dumps(good) + "\n", encoding="utf-8")
+    with pytest.raises(SplitbrainError, match="duplicate"):
+        load_dataset_v2(duplicate)
+    empty = tmp_path / "empty.jsonl"
+    empty.write_text("\n", encoding="utf-8")
+    with pytest.raises(SplitbrainError, match="empty"):
+        load_dataset_v2(empty)
+
+
+def test_resolve_dataset_keeps_release_defaults(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("SPLITBRAIN_ROOT", str(tmp_path))
+    settings = LLMSettings.load(mode="replay")
+    eval_dir = tmp_path / "eval"
+    eval_dir.mkdir()
+    (eval_dir / "dataset-v2.jsonl").write_text("", encoding="utf-8")
+    path, display, suffix = resolve_dataset(settings, None)
+    assert path == eval_dir / "dataset.jsonl"
+    assert (display, suffix) == ("eval/dataset.jsonl", "")
+    path, display, suffix = resolve_dataset(settings, "eval/dataset-v2.jsonl")
+    assert path == eval_dir / "dataset-v2.jsonl"
+    assert (display, suffix) == ("eval/dataset-v2.jsonl", "-v2")
+
+
+def test_cli_dataset_flag_defaults_to_none() -> None:
+    assert cli.build_parser().parse_args(["eval"]).dataset is None
+    args = cli.build_parser().parse_args(
+        ["eval", "--dataset", "eval/dataset-v2.jsonl", "--mode", "live"]
+    )
+    assert args.dataset == "eval/dataset-v2.jsonl"
+    assert args.mode == "live"
+
+
+def _stub_pair() -> EvalPair:
+    return EvalPair(
+        id="c01",
+        a=EvalSide(
+            room="sales",
+            author="maria",
+            text="We promised Enterprise SSO on December 1 for every customer.",
+        ),
+        b=EvalSide(
+            room="engineering",
+            author="owen",
+            text="Enterprise SSO is slipping to Q1 2027 for all customers.",
+        ),
+        label=Relation.CONTRADICTION,
+        note="stub pair",
+    )
+
+
+async def test_without_dataset_behaviour_is_unchanged(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.setenv("SPLITBRAIN_ROOT", str(tmp_path))
+    monkeypatch.setenv("SPLITBRAIN_LLM_API_KEY", "secret-live-key")
+    eval_dir = tmp_path / "eval"
+    eval_dir.mkdir()
+    calls: list[Path] = []
+
+    def spy(path: Path) -> list[EvalPair]:
+        calls.append(path)
+        return [_stub_pair()]
+
+    def no_v2(path: Path) -> list[EvalPairV2]:
+        raise AssertionError("v2 loader must not run without --dataset")
+
+    monkeypatch.setattr(evaluation, "load_dataset", spy)
+    monkeypatch.setattr(evaluation, "load_dataset_v2", no_v2)
+    await run("live", reset_live=True, transport=_FakeEvalTransport(report_usage=True))
+
+    assert calls == [eval_dir / "dataset.jsonl"]
+    assert "1 pairs from eval/dataset.jsonl" in capsys.readouterr().out
+    release = (eval_dir / "results-live.md").read_text(encoding="utf-8")
+    assert "- Dataset: `eval/dataset.jsonl`" in release
+    assert "Language mix" not in release
+    assert not (eval_dir / "results-v2-live.md").exists()
+    assert not (eval_dir / "results.md").exists()
+    assert not (tmp_path / "cassettes").exists()
+
+
+async def test_dataset_flag_writes_v2_live_report_with_language_mix(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.setenv("SPLITBRAIN_ROOT", str(tmp_path))
+    monkeypatch.setenv("SPLITBRAIN_LLM_API_KEY", "secret-live-key")
+    eval_dir = tmp_path / "eval"
+    eval_dir.mkdir()
+    (eval_dir / "dataset-v2.jsonl").write_text("{}\n", encoding="utf-8")
+    (eval_dir / "results.md").write_text("do not touch\n", encoding="utf-8")
+    (eval_dir / "results-live.md").write_text("do not touch either\n", encoding="utf-8")
+    calls: list[Path] = []
+
+    def spy(path: Path) -> list[EvalPairV2]:
+        calls.append(path)
+        return [
+            EvalPairV2(
+                id="c01",
+                a=EvalSide(
+                    room="sales",
+                    author="maria",
+                    text="We promised Enterprise SSO on December 1 for every customer.",
+                ),
+                b=EvalSide(
+                    room="engineering",
+                    author="owen",
+                    text="Enterprise SSO is slipping to Q1 2027 for all customers.",
+                ),
+                label=Relation.CONTRADICTION,
+                note="stub v2 pair",
+                lang="es",
+                tags=["currency", "relative-date"],
+            )
+        ]
+
+    def no_release(path: Path) -> list[EvalPair]:
+        raise AssertionError("release loader must not run with --dataset")
+
+    monkeypatch.setattr(evaluation, "load_dataset_v2", spy)
+    monkeypatch.setattr(evaluation, "load_dataset", no_release)
+    await run(
+        "live",
+        dataset="eval/dataset-v2.jsonl",
+        reset_live=True,
+        transport=_FakeEvalTransport(report_usage=True),
+    )
+
+    assert calls == [eval_dir / "dataset-v2.jsonl"]
+    assert "1 pairs from eval/dataset-v2.jsonl" in capsys.readouterr().out
+    report = (eval_dir / "results-v2-live.md").read_text(encoding="utf-8")
+    assert "- Dataset: `eval/dataset-v2.jsonl`" in report
+    assert "- Language mix: es=1" in report
+    assert "secret-live-key" not in report
+    assert (eval_dir / "results.md").read_text(encoding="utf-8") == "do not touch\n"
+    assert (eval_dir / "results-live.md").read_text(encoding="utf-8") == "do not touch either\n"
+    assert not (eval_dir / "results-v2.md").exists()
+    assert not (tmp_path / "cassettes").exists()
