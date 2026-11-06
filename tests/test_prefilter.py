@@ -86,3 +86,97 @@ def test_keep_is_the_boolean_shortcut() -> None:
 def test_five_words_is_the_boundary() -> None:
     assert not prefilter(msg("SSO will ship December")).keep
     assert prefilter(msg("SSO will ship on December 1")).keep
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "The hoist tolerance is 17 kN under load.",
+        "The container capacity is 42l across the catalogue.",
+        "The alloy specification allows 0.35% impurities overall.",
+        "The fixture angle is 12° throughout production.",
+        "The service deposit is ¥800 for each booking.",
+        "The account balance floor is ₦900 for every member.",
+        "The coating tolerance is 0,8‰ throughout production.",
+        "The initial batch size is 11–14 across locations.",
+        "The initial batch size is 11 — 14.",
+        "The pack contains seven adapters in total.",
+        "El paquete incluye nueve conectores por caja.",
+        "El almacén admite 24 bidones por estante.",
+        "La disponibilidad pactada es 97% para usuarios externos.",
+    ],
+)
+def test_open_ended_quantities_are_kept(text: str) -> None:
+    assert prefilter(msg(text)).keep
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "Legal signed the service agreement with Briar.",
+        "Procurement capped the aggregate supplier liability yesterday.",
+        "We are promising encrypted archives for every tenant.",
+        "We are releasing the archive connector globally.",
+        "Operations must retain encrypted backups for every tenant.",
+        "The supplier has to retain encrypted backups indefinitely.",
+        "We'll retain encrypted backups for every tenant.",
+        "We’re going to retain encrypted backups indefinitely.",
+        "El operador garantizará continuidad durante toda la migración.",
+        "El acceso exige autenticación reforzada para externos.",
+        "Nos comprometimos a mantener las copias disponibles.",
+        "La entidad firmó el acuerdo de custodia.",
+        "El equipo deberá conservar las copias cifradas.",
+        "We are not accepting new tenants anymore.",
+        "The old connector is not supported anymore.",
+        "El servicio ya no admite solicitudes externas.",
+    ],
+)
+def test_commitment_inflections_and_obligations_are_kept(text: str) -> None:
+    assert prefilter(msg(text)).keep
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "General availability is set for the end of quarter.",
+        "The service window is available from next month.",
+        "The replacement takes effect by tomorrow across locations.",
+        "The restriction remains until further notice for everyone.",
+        "El acceso queda disponible antes de fin de trimestre.",
+        "La renovación entra en vigor el próximo año.",
+        "La ventana de mantenimiento termina para mañana.",
+    ],
+)
+def test_relative_deadlines_are_kept(text: str) -> None:
+    assert prefilter(msg(text)).keep
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "Hello everyone, lovely to see you here!",
+        "Hola a todos, qué gusto verlos por aquí.",
+        "Thanks everyone for helping out, much appreciated.",
+        "Muchas gracias por la ayuda, excelente trabajo equipo.",
+        "Who wants to join us for lunch?",
+        "Anyone up for pizza after the meeting?",
+        "¿Alguien quiere almorzar conmigo después de la reunión?",
+        "Let us grab coffee after the standup tomorrow.",
+        "Can anyone help me out here?",
+        "Does anybody know what happened here?",
+        "You are one of a kind indeed.",
+        "It was three of us having lunch.",
+        "The wireless signal looks much better over here.",
+        "The firmware looks interesting from what I heard.",
+        "The picture is numbered but looks nice.",
+        "Well, that is 123, thanks everyone!",
+        "Well, that is 123. Thanks everyone!",
+        "No decision yet, just thinking out loud here.",
+        "Signed the agreement",
+        "El límite es 70%",
+        "Confirmed, thanks!",
+        "yes",
+    ],
+)
+def test_chatter_and_short_messages_still_drop(text: str) -> None:
+    assert not prefilter(msg(text)).keep

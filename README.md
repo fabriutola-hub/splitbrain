@@ -18,7 +18,7 @@ A two-minute path through the project:
 | **See it in chat** | Open http://localhost:8065 and log in as `maria` or `tomas` with the password printed in the `DEMO SUMMARY`, which also links to the private conflict room. |
 | **How Switch is used** | [Every Switch feature and the file that uses it](#how-splitbrain-uses-switch): the event stream, agent-created private rooms, an exclusive role with a standby, room documents as the decision record, `link_rooms`, a GitHub reference and one YAML template. Without Switch there is no transport and no shared state. |
 | **What we found in Switch** | [A reproducible race in the exclusive role lease](#what-we-found-in-switch-0310), plus four protocol details that cost us time. |
-| **Does it work** | 540 unit tests, 5 integration tests against a live stack, and two [evaluations](#evaluation): the 44-pair dataset (replay: precision 1.000, recall 0.889, F1 0.941; 3-run live mean: 1.000 / 0.833 / 0.909) and [100 unseen cases](#unseen-cases-v2) (3-run live mean: precision 0.927, recall 0.600, F1 0.728). Both list their errors, including the drop in recall. |
+| **Does it work** | 598 unit tests, 5 integration tests for a live stack, and two [evaluations](#evaluation): the 44-pair replay remains precision 1.000, recall 0.889, F1 0.941 (3-run live mean: 1.000 / 0.833 / 0.909). After the prefilter change, [v2](#unseen-cases-v2) has 3-run live mean 0.849 / 0.857 / 0.853; live precision drops. Development was used to tune the prefilter; reserve contains no contradictions, so its recall cannot be measured. |
 | **Honest limits** | [Known limits](#known-limits): tested on Windows 11 and on Mattermost only. |
 
 Sales promises Acme that SSO will be live on December 1, in a public channel. Engineering pulls SSO out of Q4, in a private channel. Nobody is a member of both rooms, so nobody sees both statements. The Sentinel is: it listens to every room over a `scope=all&filter=all` event stream, records both claims, and the other two agents convene the only people who can resolve the difference.
@@ -240,18 +240,27 @@ The three errors are real and listed in `eval/results.md`: two false negatives w
 
 ### Unseen cases (v2)
 
-An external review pointed out that the 44 pairs above were all written by us. [`eval/dataset-v2.jsonl`](eval/dataset-v2.jsonl) adds **100 brand-new pairs** (35 contradictions, 15 updates, 25 compatible, 25 unrelated; 30 % Spanish or cross-language) about customers and products that appear nowhere else in the repo. [How they were built and labelled](eval/README-v2.md) is versioned with them: the labels were written before any run and never changed after. Run them with `uv run splitbrain eval --dataset eval/dataset-v2.jsonl --mode live`; the full report, including every error, is [`eval/results-v2-live.md`](eval/results-v2-live.md). No cassettes were recorded for v2.
+[`eval/dataset-v2.jsonl`](eval/dataset-v2.jsonl) contains **100 additional hand-labelled pairs** (35 contradictions, 15 updates, 25 compatible, 25 unrelated; 30 % Spanish or cross-language). [The construction and labelling protocol](eval/README-v2.md) is versioned; no labels changed. The [full live report](eval/results-v2-live.md) preserves all three **before** runs and all three **after** runs, every error, and metrics by ID split. Run `uv run splitbrain eval --dataset eval/dataset-v2.jsonl --mode live`; no v2 cassettes were recorded.
 
-Three independent live runs (`deepseek-ai/DeepSeek-V4.1-Flash-1017` via `https://api.river.ai/v1`, 2026-11-06):
+After the initial mean precision/recall/F1 of **0.927 / 0.600 / 0.728**, the prefilter was generalized using only **v001-v050 (development)**: open-ended quantities and symbols, inflected commitments and obligations, negations, and contextual deadlines. The prefilter and tests were frozen in `7ddd17a`, and missing original-evaluation cassettes in `b117934`, before opening **v051-v100 (reserve)** pairs or detailed errors. The initial required README read had already exposed its brief summaries of reserve errors v060 and v070; that information-barrier limitation is disclosed in the report. **Development is no longer unseen to the prefilter**, and it was not retuned after opening reserve.
+
+Three new live runs after the prefilter change (`deepseek-ai/DeepSeek-V4.1-Flash-1017` via `https://api.river.ai/v1`, 2026-11-06):
 
 | run | UTC | precision | recall | F1 | TP / FP / FN / TN | errors | LLM calls | total time | mean latency / call | tokens (in / out / total) |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| 1 | 2026-11-06T07:59:57+00:00 | 0.913 | 0.600 | 0.724 | 21 / 2 / 14 / 63 | 42 | 100 | 287.94s | 2.525s | 161815 / 11892 / 173707 |
-| 2 | 2026-11-06T08:04:47+00:00 | 0.955 | 0.600 | 0.737 | 21 / 1 / 14 / 64 | 42 | 100 | 336.36s | 3.009s | 161814 / 11896 / 173710 |
-| 3 | 2026-11-06T08:10:26+00:00 | 0.913 | 0.600 | 0.724 | 21 / 2 / 14 / 63 | 43 | 100 | 363.69s | 3.257s | 161821 / 11896 / 173717 |
-| **Mean** | — | **0.927** | **0.600** | **0.728** | 21.0 / 1.7 / 14.0 / 63.3 | 42.3 | 100.0 | 329.33s | 2.930s | 161817 / 11895 / 173711 |
+| 1 | 2026-11-06T19:48:53+00:00 | 0.857 | 0.857 | 0.857 | 30 / 5 / 5 / 60 | 25 | 154 | 294.81s | 1.557s | 248852 / 18284 / 267136 |
+| 2 | 2026-11-06T19:53:49+00:00 | 0.833 | 0.857 | 0.845 | 30 / 6 / 5 / 59 | 24 | 155 | 404.84s | 2.256s | 250786 / 18258 / 269044 |
+| 3 | 2026-11-06T20:00:35+00:00 | 0.857 | 0.857 | 0.857 | 30 / 5 / 5 / 60 | 24 | 154 | 323.50s | 1.744s | 248862 / 18239 / 267101 |
+| **Mean** | — | **0.849** | **0.857** | **0.853** | 30.0 / 5.3 / 5.0 / 59.7 | 24.3 | 154.3 | 341.05s | 1.853s | 249500 / 18260 / 267760 |
 
-These numbers are clearly worse than the 44-pair replay and we are not hiding them: precision stays high (0.927 mean) but recall drops to 0.600, with 42–43 wrong labels per run. Most of the damage happens **before** the model: the vocabulary-based prefilter discards one side of 30 pairs per run as `no commitment signal (pure chatter)` because unseen units (`kg`, `lb`), verbs (`signed`, `capped`) and some Spanish phrasing are not in its signal list. The rest are compatible pairs rejected by the matcher as a different subject and a few genuine classifier mistakes: an own-correction about currency (v044) was read as a contradiction in all three runs, and two different authorized exceptions were misread as contradictions (v060 in run 1, v070 in run 3). The 44-pair numbers describe the workflow we built for; these 100 describe information we did not design for. We left the labels, the prefilter and the model untouched after seeing the results.
+Means by split (`n/a` denotes a zero denominator):
+
+| slice | pairs / actual contradictions | mean precision | mean recall | mean F1 | mean FP | label accuracy |
+| --- | --- | --- | --- | --- | --- | --- |
+| development | 50 / 35 | 0.909 | 0.857 | 0.882 | 3.000 | 0.780 |
+| reserve | 50 / 0 | 0.000 | n/a | 0.000 | 2.333 | 0.733 |
+
+The ID split is **not stratified**: all 35 contradictions and 15 updates are in development; reserve has 25 compatible and 25 unrelated pairs. **Reserve recall cannot be measured**, so the overall recall improvement is not a validation on unseen contradictions. Reserve label accuracy improves less than development (0.633 to 0.733, versus 0.520 to 0.780), and its mean false positives rise from 0.667 to 2.333. Overall live precision also falls to 0.849: the broader prefilter reduces missed commitments but exposes more classifier mistakes. This change **does not meet the goal of preserving live precision**. The original 44-pair replay remains 1.000 / 0.889 / 0.941. See [the validation record](eval/prefilter-validation.md) for tests, unchanged scenario counts, cassette additions, and live-stack checks still to run.
 
 ## What we found in Switch 0.31.0
 
@@ -290,7 +299,7 @@ Honest scope of the demo:
 - **A room only convenes people from the same chat app.** Rooms are bridged to one bridge (`bridge_id` in `get_room_detail`); the demo's people are all Mattermost users on the same team.
 - **Switch is pinned to 0.31.0** (`deploy/.env.example`, `src/splitbrain/config.py`). `Settings.load` refuses any other `SWITCH_VERSION` instead of guessing.
 - **No destructive Switch operations exist** in this repo, by design: there is no delete of rooms, roles, references or documents. A `down --wipe` is the way to get a clean stack, and old room names can survive as duplicates if you create rooms by hand.
-- **The classifier misses two global-vs-customer contradictions** (recall 0.889, see Evaluation). The original eval dataset is 44 hand-written pairs, not a production benchmark; on [100 unseen pairs](#unseen-cases-v2) the live mean recall falls to 0.600, mostly because the vocabulary-based prefilter discards messages whose units, verbs or Spanish phrasing it was not written for.
+- **Generalization remains limited.** The classifier still misses two global-vs-customer contradictions in the original 44-pair replay (recall 0.889). After generalizing the prefilter, [v2](#unseen-cases-v2) live mean precision/recall/F1 is 0.849 / 0.857 / 0.853: recall improves but precision falls. Development v001-v050 was used to design the prefilter and is no longer unseen; reserve v051-v100 contains no contradictions, so it cannot validate recall on unseen contradictions. Reserve label accuracy improves less, and its false-positive rate worsens. The report discloses the pre-existing README summaries of two reserve errors.
 
 ## Troubleshooting
 
