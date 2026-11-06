@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from collections.abc import Awaitable, Callable
 from typing import Any
 
 from .. import bootstrap
@@ -23,6 +24,7 @@ from ..evidence.github import (
     GitHubEvidence,
     GitHubSnapshot,
     SplitbrainEvidenceError,
+    TransientEvidenceError,
     build_evidence,
 )
 from ..evidence.scenario import ENV_VAR, ScenarioEvidence, load_scenario_evidence
@@ -71,7 +73,12 @@ class Verifier:
         state: bootstrap.BootstrapState,
         evidence_settings: EvidenceSettings,
         scenario: ScenarioEvidence | None = None,
+        retry_attempts: int = 3,
+        retry_backoff_s: float = 0.25,
+        sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
     ) -> None:
+        if retry_attempts < 1:
+            raise ValueError("retry_attempts must be at least 1")
         ops = state.rooms.get(OPS_ROOM)
         if ops is None:
             raise SplitbrainError("splitbrain-ops is missing from .splitbrain/state.json")
@@ -80,6 +87,9 @@ class Verifier:
         self.ops_room_id = ops.room_id
         self.evidence_settings = evidence_settings
         self.scenario = scenario
+        self.retry_attempts = retry_attempts
+        self.retry_backoff_s = retry_backoff_s
+        self._sleep = sleep
         self.coverage = RoomCoverage(agent, self.ops_room_id, own_name=AGENT_NAME)
         self.provider: GitHubEvidence | None = None
         self.repo_url: str | None = None
@@ -212,16 +222,49 @@ class Verifier:
         if self.provider is None:
             raise SplitbrainError("Evidence request arrived before the GitHub reference was loaded")
         terms = [subject, subject_key.replace("-", " ").replace("_", " "), *subject.split()]
-        snapshot: GitHubSnapshot
-        snapshot, matched = await self.provider.snapshot_any(terms)
-        logger.info("Evidence lookup for %r used term %r", subject, matched)
-        return build_evidence(
+        last_error: TransientEvidenceError | None = None
+        for attempt in range(1, self.retry_attempts + 1):
+            try:
+                snapshot: GitHubSnapshot
+                snapshot, matched = await self.provider.snapshot_any(terms)
+            except TransientEvidenceError as exc:
+                last_error = exc
+                logger.warning(
+                    "GitHub evidence attempt %d/%d failed for %s: %s",
+                    attempt,
+                    self.retry_attempts,
+                    candidate_id,
+                    exc,
+                )
+                if attempt < self.retry_attempts:
+                    await self._sleep(self.retry_backoff_s * attempt)
+                continue
+            logger.info("Evidence lookup for %r used term %r", subject, matched)
+            return build_evidence(
+                candidate_id,
+                matched,
+                snapshot,
+                source="fixture" if self.evidence_settings.mode == "fixture" else "github",
+                claim_a=claim_a,
+                claim_b=claim_b,
+            )
+        assert last_error is not None
+        logger.error(
+            "GitHub evidence unavailable for %s after %d attempts: %s",
             candidate_id,
-            matched,
-            snapshot,
+            self.retry_attempts,
+            last_error,
+        )
+        return Evidence(
+            candidate_id=candidate_id,
             source="fixture" if self.evidence_settings.mode == "fixture" else "github",
-            claim_a=claim_a,
-            claim_b=claim_b,
+            status="unavailable",
+            items=[],
+            summary=(
+                "Evidence unavailable: GitHub did not respond after "
+                f"{self.retry_attempts} attempts."
+            ),
+            detail=f"GitHub, {self.provider.slug}: {last_error}",
         )
 
     @staticmethod

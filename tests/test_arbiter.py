@@ -82,6 +82,7 @@ def make_arbiter() -> mod.Arbiter:
         (0.69, "supports_b", "discarded"),
         (0.95, "inconclusive", "discarded"),
         (0.99, "none", "discarded"),
+        (0.99, "unavailable", "discarded"),
     ],
 )
 def test_verdict_rule(confidence: float, status: str, expected: str) -> None:
@@ -443,3 +444,66 @@ async def test_inconclusive_evidence_discards_candidate_and_contacts_nobody() ->
     assert kind == "verdict"
     assert payload["verdict"] == "discarded"
     assert payload["evidence_status"] == "inconclusive"
+
+
+async def test_unavailable_evidence_discards_candidate_and_contacts_nobody() -> None:
+    from splitbrain.core.packets import decode, encode
+    from splitbrain.switch.events import MessageFrame, MessagePayload
+
+    class FakeAgent:
+        def __init__(self) -> None:
+            self.posts: list[tuple[str, str, str | None]] = []
+            self.targeted_calls: list[dict] = []
+
+        async def post(self, room_id: str, body: str, *, thread_id: str | None = None) -> dict:
+            self.posts.append((room_id, body, thread_id))
+            return {}
+
+        async def targeted(self, room_id: str, body: str, **kwargs) -> dict:
+            self.targeted_calls.append({"room_id": room_id, "body": body, **kwargs})
+            return {}
+
+    arbiter = make_arbiter()
+    arbiter.is_holder = True
+    arbiter.coverage.rooms["r-ops"] = "splitbrain-ops"
+    item = verification()
+    item.evidence = None
+    arbiter.verifications[item.candidate.id] = item
+    fake = FakeAgent()
+    arbiter.agent = fake  # type: ignore[assignment]
+
+    unavailable = Evidence(
+        candidate_id="sb-0001",
+        source="github",
+        status="unavailable",
+        summary="Evidence unavailable: GitHub did not respond after 3 attempts.",
+        items=[],
+    )
+    frame = MessageFrame(
+        kind="message",
+        sequence=1,
+        room_id="r-ops",
+        payload=MessagePayload(
+            message_id="sw_ev",
+            sender_name="splitbrain-verifier",
+            body="Evidence.\n" + encode("evidence", unavailable),
+            thread_id="sw-root",
+        ),
+    )
+    await arbiter.on_frame(frame)
+    assert item.verdict == "discarded"
+    assert item.finished is True
+    assert item.room_id is None
+    assert fake.targeted_calls == []
+    assert len(fake.posts) == 1
+    room_id, body, thread_id = fake.posts[0]
+    assert room_id == "r-ops"
+    assert thread_id == "sw-root"
+    assert (
+        "Verdict for SB-0001: DISCARDED. Evidence unavailable: "
+        "GitHub did not respond after 3 attempts. Nobody is contacted."
+    ) in body
+    kind, payload = decode(body.splitlines()[-1])
+    assert kind == "verdict"
+    assert payload["verdict"] == "discarded"
+    assert payload["evidence_status"] == "unavailable"
