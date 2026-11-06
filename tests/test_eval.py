@@ -748,3 +748,25 @@ async def test_dataset_flag_with_the_release_dataset_uses_the_release_loader(
     report = (eval_dir / "results-live.md").read_text(encoding="utf-8")
     assert "- Dataset: `eval/dataset.jsonl`" in report
     assert not (eval_dir / "results-v2-live.md").exists()
+
+
+async def test_alternative_dataset_cannot_overwrite_the_release_report(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("SPLITBRAIN_ROOT", str(tmp_path))
+    monkeypatch.delenv("SPLITBRAIN_LLM_API_KEY", raising=False)
+    monkeypatch.delenv("SPLITBRAIN_LLM_MODE", raising=False)
+    eval_dir = tmp_path / "eval"
+    eval_dir.mkdir()
+    scratch = tmp_path / "scratch"
+    scratch.mkdir()
+    (scratch / "dataset.jsonl").write_text(_v2_pair().model_dump_json() + "\n", encoding="utf-8")
+
+    with pytest.raises(SplitbrainError) as error:
+        await run("replay", dataset=str(scratch / "dataset.jsonl"))
+
+    message = str(error.value)
+    assert "scratch/dataset.jsonl" in message
+    assert "eval/results.md" in message
+    assert not (eval_dir / "results.md").exists()
+    assert not (eval_dir / "results-live.md").exists()

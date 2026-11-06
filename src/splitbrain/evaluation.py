@@ -569,6 +569,12 @@ async def run(
     release_dataset = (settings.eval_dir / "dataset.jsonl").resolve()
     is_release_dataset = source.resolve() == release_dataset
     pairs = load_dataset(source) if is_release_dataset else load_dataset_v2(source)
+    if not is_release_dataset and not suffix:
+        raise SplitbrainError(
+            f"--dataset {display} would overwrite the release report "
+            "(eval/results.md or eval/results-live.md). Rename the file (for example "
+            "dataset-alt.jsonl) so its report has its own name."
+        )
     cassettes = CassetteStore(
         settings.cassettes_dir,
         model=settings.model,
