@@ -20,6 +20,16 @@ from typing import Any
 from .. import bootstrap
 from ..config import LLMSettings, Settings, SplitbrainError
 from ..core.decision import quoted_sentence
+from ..core.decision_record import (
+    CONTEXT_LIMIT,
+    CorrectionJournal,
+    latest_record,
+    load_correction_journal,
+    load_decision_records,
+    message_id,
+    pending_corrections,
+    posted_message,
+)
 from ..core.matcher import match_report
 from ..core.models import (
     Candidate,
@@ -627,9 +637,48 @@ class Sentinel:
         return True
 
     async def _apply_corrections(self, frame: MessageFrame, decided: DecidedPacket) -> None:
+        locks = getattr(self, "_correction_locks", None)
+        if locks is None:
+            locks = self._correction_locks = {}
+        async with locks.setdefault(decided.candidate_id, asyncio.Lock()):
+            await self._resume_corrections(frame, decided)
+
+    async def _save_corrections(self, document_id: str, journal: CorrectionJournal) -> str:
+        async with self.agent.act_in(journal.decided.conflict_room):
+            if document_id:
+                await self.agent.op(
+                    "update_room_document", document_id=document_id, content=journal.render()
+                )
+                return document_id
+            result = await self.agent.op(
+                "create_room_document",
+                name=f"{journal.decided.candidate_id.upper()} correction progress",
+                description="Per-thread delivery receipts for the human decision",
+                instructions="Only the Sentinel edits delivery progress; never alter the decision.",
+                content=journal.render(),
+            )
+            return str(result["document_id"])
+
+    async def _resume_corrections(self, frame: MessageFrame, decided: DecidedPacket) -> None:
         if decided.candidate_id in self.corrected:
             return
-        self.corrected.add(decided.candidate_id)
+        # This reader is shared with decision-memory reminders: both must see
+        # the newest holder's record, rather than an older owner's OPEN copy.
+        record = await self._read_decision_record(decision_claim_for(decided), decided.candidate_id)
+        if record is None:
+            raise SplitbrainError(f"Cannot correct {decided.candidate_id} without its final record")
+        document_id, journal = await load_correction_journal(
+            self.agent, decided.conflict_room, decided.candidate_id
+        )
+        if journal is None:
+            journal = CorrectionJournal(
+                decided=decided, threads=pending_corrections(decided.origins)
+            )
+            if not journal.threads:
+                raise SplitbrainError("A correction needs at least one original thread")
+            document_id = await self._save_corrections(document_id, journal)
+        elif journal.decided != decided:
+            raise SplitbrainError("Correction retry disagrees with the persisted human decision")
         self.decision_authors[decided.candidate_id] = list(decided.authors)
         self.ops_threads[decided.candidate_id] = reply_thread(frame)
         if self.tui is not None:
@@ -648,11 +697,32 @@ class Sentinel:
             f"#{decided.conflict_room_name}. Decision: {quoted_sentence(decided.decision.text)} "
             "Please use this from now on."
         )
+        for progress in journal.threads:
+            if progress.status == "posted":
+                continue
+            context = await self.agent.op(
+                "read_context", room_id=progress.room_id, limit=CONTEXT_LIMIT, connection=False
+            )
+            receipt = posted_message(context, body, {AGENT_NAME}, thread_id=progress.thread_id)
+            if not receipt:
+                if not any(
+                    message_id(thread.get("root") or {}) == progress.thread_id
+                    for thread in context.get("threads", [])
+                ):
+                    raise SplitbrainError(
+                        f"Origin thread {progress.thread_id} is outside Switch context; "
+                        "refusing a correction whose previous delivery cannot be checked"
+                    )
+                result = await self.agent.post(progress.room_id, body, thread_id=progress.thread_id)
+                receipt = message_id(result)
+                if not receipt:
+                    raise SplitbrainError("Correction publication returned no message id")
+            progress.status = "posted"
+            progress.message_id = receipt
+            await self._save_corrections(document_id, journal)
         for origin in decided.origins:
             await self.store.set_status(origin.claim_id, ClaimStatus.RESOLVED)
         await self.store.add_claim(decision_claim_for(decided))
-        for origin in decided.origins:
-            await self.agent.post(origin.room_id, body, thread_id=origin.thread_id)
         rooms = [f"#{origin.room_name}" for origin in decided.origins]
         packet = CorrectedPacket(
             candidate_id=decided.candidate_id,
@@ -660,13 +730,24 @@ class Sentinel:
             conflict_room_name=decided.conflict_room_name,
             rooms=[origin.room_name for origin in decided.origins],
         )
-        await self.agent.targeted(
-            self.ops_room_id,
-            f"Corrections posted in {', '.join(rooms)} for {decided.candidate_id.upper()}.\n"
-            + encode("corrected", packet),
-            target_roles=["arbiter"],
-            thread_id=reply_thread(frame),
-        )
+        if not journal.notified:
+            notification = (
+                f"Corrections posted in {', '.join(rooms)} for {decided.candidate_id.upper()}.\n"
+                + encode("corrected", packet)
+            )
+            context = await self.agent.op(
+                "read_context", room_id=self.ops_room_id, limit=CONTEXT_LIMIT, connection=False
+            )
+            if not posted_message(context, notification, {AGENT_NAME}):
+                await self.agent.targeted(
+                    self.ops_room_id,
+                    notification,
+                    target_roles=["arbiter"],
+                    thread_id=reply_thread(frame),
+                )
+            journal.notified = True
+            await self._save_corrections(document_id, journal)
+        self.corrected.add(decided.candidate_id)
         if self.tui is not None:
             self.tui.add_step(
                 decided.candidate_id,
@@ -685,38 +766,8 @@ class Sentinel:
     async def _read_decision_record(self, decision: Claim, candidate_id: str) -> str | None:
         """Read the conflict room document from Switch and confirm Status: DECIDED."""
         try:
-            async with self.agent.act_in(decision.room_id):
-                joined = await self.agent.op("connect_to_room", room_id=decision.room_id)
-                documents = (joined.get("documents") if isinstance(joined, dict) else None) or []
-                expected = f"{candidate_id.upper()} decision record"
-                document_id = next(
-                    (
-                        str(doc["id"])
-                        for doc in documents
-                        if isinstance(doc, dict)
-                        and doc.get("id")
-                        and str(doc.get("name", "")) == expected
-                    ),
-                    None,
-                )
-                if document_id is None:
-                    document_id = next(
-                        (
-                            str(doc["id"])
-                            for doc in documents
-                            if isinstance(doc, dict) and doc.get("id")
-                        ),
-                        None,
-                    )
-                if document_id is None:
-                    logger.error(
-                        "Cannot verify decision %s in #%s: no room document found; "
-                        "refusing to post reminder",
-                        candidate_id,
-                        decision.room_name,
-                    )
-                    return None
-                loaded = await self.agent.op("load_internal_documents", ids=[document_id])
+            records, _ = await load_decision_records(self.agent, decision.room_id, candidate_id)
+            selected = latest_record(records)
         except Exception:
             logger.error(
                 "Failed to read decision record for %s in #%s; refusing to post reminder",
@@ -725,14 +776,10 @@ class Sentinel:
                 exc_info=True,
             )
             return None
-        entries = (
-            loaded
-            if isinstance(loaded, list)
-            else (loaded.get("documents") if isinstance(loaded, dict) else None) or []
-        )
-        content = "\n".join(
-            str(item.get("content", "")) for item in entries if isinstance(item, dict)
-        )
+        if selected is None:
+            logger.error("Cannot verify decision %s: no room document found", candidate_id)
+            return None
+        content = selected.content
         if "Status: DECIDED" not in content:
             logger.error(
                 "Decision record for %s in #%s does not have 'Status: DECIDED'; "
