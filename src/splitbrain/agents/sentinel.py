@@ -20,7 +20,7 @@ from typing import Any
 
 import httpx
 
-from .. import bootstrap
+from .. import bootstrap, demo_faults
 from ..config import LLMSettings, Settings, SplitbrainError
 from ..core.decision import quoted_sentence
 from ..core.decision_record import (
@@ -1008,6 +1008,7 @@ class Sentinel:
             progress.status = "posted"
             progress.message_id = receipt
             await self._save_corrections(document_id, journal)
+            demo_faults.after_correction_checkpoint(journal)
         for origin in decided.origins:
             await self.store.set_status(origin.claim_id, ClaimStatus.RESOLVED)
         await self.store.add_claim(decision_claim_for(decided))
