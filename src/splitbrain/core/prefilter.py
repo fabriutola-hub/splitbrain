@@ -74,9 +74,10 @@ _OBLIGATION_RE = re.compile(
     r"debe(?:n|mos|ra\w*)?|tiene[n]?\s+que|hay\s+que)\b",
     re.IGNORECASE,
 )
-_NO_LONGER_RE = re.compile(
-    r"\b(?:no longer|not anymore|ya no)\b|\bnot\b[^.!?\n]*\banymore\b", re.IGNORECASE
-)
+_NO_LONGER_RE = re.compile(r"\b(?:no longer|not anymore|ya no)\b", re.IGNORECASE)
+# `not ... anymore` may be separated by a long clause, so it is scanned token by
+# token: a backtracking regex over the gap is quadratic on long chat messages.
+_NOT_ANYMORE_RE = re.compile(r"\bnot\b|\banymore\b|[.!?\n]", re.IGNORECASE)
 _DEADLINE_RE = re.compile(
     rf"\b(?:by|before|until|from|in|during|for|starting)\s+"
     rf"(?:this|next|following)\s+(?:{_PERIODS})\b|"
@@ -113,25 +114,44 @@ def _has_quantity(text: str) -> bool:
     )
 
 
+def _has_not_anymore(text: str) -> bool:
+    """True when `not` precedes `anymore` inside one sentence, in linear time."""
+    seen_not = False
+    for match in _NOT_ANYMORE_RE.finditer(text):
+        token = match.group().casefold()
+        if token == "anymore":
+            if seen_not:
+                return True
+        elif token == "not":
+            seen_not = True
+        else:
+            seen_not = False
+    return False
+
+
 def _has_commitment_signal(text: str) -> bool:
     text = "".join(
         char
         for char in unicodedata.normalize("NFKD", text.casefold())
         if not unicodedata.combining(char)
     )
-    return _has_quantity(text) or any(
-        pattern.search(text)
-        for pattern in (
-            _DATE_RE,
-            _MONTH_RE,
-            _WEEKDAY_RE,
-            _QUARTER_RE,
-            _RANGE_RE,
-            _VERB_RE,
-            _CONTRACT_VERB_RE,
-            _OBLIGATION_RE,
-            _NO_LONGER_RE,
-            _DEADLINE_RE,
+    return (
+        _has_quantity(text)
+        or _has_not_anymore(text)
+        or any(
+            pattern.search(text)
+            for pattern in (
+                _DATE_RE,
+                _MONTH_RE,
+                _WEEKDAY_RE,
+                _QUARTER_RE,
+                _RANGE_RE,
+                _VERB_RE,
+                _CONTRACT_VERB_RE,
+                _OBLIGATION_RE,
+                _NO_LONGER_RE,
+                _DEADLINE_RE,
+            )
         )
     )
 

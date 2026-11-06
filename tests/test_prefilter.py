@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+import re
+import time
+
 import pytest
 
 from splitbrain.core.models import Message
-from splitbrain.core.prefilter import keep, prefilter
+from splitbrain.core.prefilter import _has_not_anymore, keep, prefilter
 
 
 def msg(
@@ -180,3 +183,70 @@ def test_relative_deadlines_are_kept(text: str) -> None:
 )
 def test_chatter_and_short_messages_still_drop(text: str) -> None:
     assert not prefilter(msg(text)).keep
+
+
+# `not ... anymore` used to be one regex with `[^.!?\n]*` between the two words:
+# quadratic on long messages. The scan below must keep the same decisions.
+
+
+_OLD_NOT_ANYMORE_RE = re.compile(r"\bnot\b[^.!?\n]*\banymore\b", re.IGNORECASE)
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "not anymore",
+        "not  anymore",
+        "not, anymore",
+        "not - anymore",
+        "not. anymore",
+        "not! anymore",
+        "not? anymore",
+        "not\nanymore",
+        "not anymore.",
+        "not anymore!",
+        "not anymorex",
+        "notx anymore",
+        "cannot anymore",
+        "not not anymore",
+        "not anymore not",
+        "no longer",
+        "ya no",
+        "nothing anymore",
+        "not here, not there, not anymore",
+    ],
+)
+def test_not_anymore_scan_keeps_the_previous_semantics(text: str) -> None:
+    assert _has_not_anymore(text) is bool(_OLD_NOT_ANYMORE_RE.search(text))
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "It is not raining. Nobody cares anymore.",
+        "It is not raining\nnobody cares anymore",
+    ],
+)
+def test_not_anymore_does_not_cross_a_sentence_boundary(text: str) -> None:
+    assert not prefilter(msg(text)).keep
+
+
+def test_not_anymore_with_a_gap_inside_one_sentence_is_a_signal() -> None:
+    assert prefilter(msg("It is not, after all this time, available anymore.")).keep
+
+
+def test_long_repeated_not_stays_fast() -> None:
+    text = "not " * 10_000 + "x"  # 40 000 characters, no `anymore` to find
+    started = time.perf_counter()
+    decision = prefilter(msg(text))
+    elapsed = time.perf_counter() - started
+    assert not decision.keep
+    assert elapsed < 1.0, f"prefilter took {elapsed:.2f}s on {len(text)} characters"
+
+
+def test_long_digits_and_symbols_stay_fast() -> None:
+    text = "1,2.3-4%5$6 + " * 800  # 10 400 characters of digits and symbols
+    started = time.perf_counter()
+    prefilter(msg(text))
+    elapsed = time.perf_counter() - started
+    assert elapsed < 0.5, f"prefilter took {elapsed:.2f}s on {len(text)} characters"
