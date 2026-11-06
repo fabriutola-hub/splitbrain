@@ -11,6 +11,7 @@ import respx
 
 from splitbrain.config import LLMSettings
 from splitbrain.core.models import ClassificationResult
+from splitbrain.llm.cassette import CassetteStore
 from splitbrain.llm.client import HttpTransport, LLMClient, LLMResponseError
 from splitbrain.llm.prompts import EXTRACTION_SYSTEM
 
@@ -28,11 +29,11 @@ def _settings(tmp_path: Path, monkeypatch, *, effort: str | None = "none") -> LL
     return LLMSettings.load(mode="live")
 
 
-def _completion(content: dict) -> httpx.Response:
-    return httpx.Response(
-        200,
-        json={"choices": [{"message": {"content": json.dumps(content)}}]},
-    )
+def _completion(content: dict, *, usage: dict | None = None) -> httpx.Response:
+    body: dict = {"choices": [{"message": {"content": json.dumps(content)}}]}
+    if usage is not None:
+        body["usage"] = usage
+    return httpx.Response(200, json=body)
 
 
 @respx.mock
@@ -57,6 +58,32 @@ async def test_http_payload_and_headers(tmp_path: Path, monkeypatch) -> None:
     assert payload["reasoning_effort"] == "none"
     assert payload["messages"][0]["role"] == "system"
     assert request.headers["authorization"] == "Bearer super-secret-key"
+
+
+@respx.mock
+async def test_http_transport_tracks_latency_and_token_usage(tmp_path: Path, monkeypatch) -> None:
+    settings = _settings(tmp_path, monkeypatch)
+    respx.post("https://llm.test/v1/chat/completions").mock(
+        return_value=_completion(
+            {"relation": "contradiction", "confidence": 0.9, "reason": "Two dates."},
+            usage={"prompt_tokens": 120, "completion_tokens": 30, "total_tokens": 150},
+        )
+    )
+    client = LLMClient(
+        settings,
+        CassetteStore(tmp_path / "cassettes", model=settings.model, mode="live"),
+    )
+    try:
+        await client.structured("system", "user", ClassificationResult)
+        stats = client.stats()
+    finally:
+        await client.aclose()
+    assert stats.calls == 1
+    assert stats.mean_latency_s >= 0.0
+    assert stats.usage_reported is True
+    assert stats.prompt_tokens == 120
+    assert stats.completion_tokens == 30
+    assert stats.total_tokens == 150
 
 
 @respx.mock
@@ -149,7 +176,6 @@ async def test_replay_mode_refuses_to_build_a_transport(tmp_path: Path, monkeypa
     monkeypatch.setenv("SPLITBRAIN_ROOT", str(tmp_path))
     monkeypatch.setenv("SPLITBRAIN_LLM_API_KEY", "unit-test-key")
     settings = LLMSettings.load(mode="replay")
-    from splitbrain.llm.cassette import CassetteStore
 
     client = LLMClient(settings, CassetteStore(tmp_path, model=settings.model, mode="replay"))
     with pytest.raises(Exception, match="replay mode must not open"):

@@ -6,21 +6,24 @@ below describe what the agent will do in a live room.
 
 from __future__ import annotations
 
+import json
 import os
 import re
+import time
 from collections import Counter
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from .config import LLM_MODES, LLMSettings, SplitbrainError
+from .config import LLM_MODES, LLMSettings, SplitbrainError, redact
 from .core.models import EvalPair
 from .core.pipeline import Brain, PairResult
 from .llm.cassette import CassetteStore
-from .llm.client import LLMClient
+from .llm.client import LLMCallStats, LLMClient, LLMTransport
 
 LABELS: tuple[str, ...] = ("contradiction", "update", "compatible", "unrelated")
 METRIC_MARKER = "<!-- splitbrain-metrics {content} -->"
+LIVE_RUNS_PATTERN = re.compile(r"<!-- splitbrain-live-runs (.*?) -->", re.DOTALL)
 
 
 def resolve_mode(cli_mode: str | None) -> str:
@@ -153,8 +156,6 @@ def _cassette_model(root: Path) -> str | None:
         if not folder.is_dir():
             continue
         for path in sorted(folder.glob("*.json"))[:1]:
-            import json
-
             record = json.loads(path.read_text(encoding="utf-8"))
             return str(record.get("model", "unknown"))
     return None
@@ -233,11 +234,233 @@ def render_markdown(
     return "\n".join(lines)
 
 
+def build_live_run_record(
+    metrics: dict[str, Any],
+    *,
+    settings: LLMSettings,
+    duration_s: float,
+    call_stats: LLMCallStats,
+    run_utc: str | None = None,
+) -> dict[str, Any]:
+    timestamp = run_utc or datetime.now(UTC).isoformat(timespec="seconds")
+    matrix = {
+        f"{label}:{predicted}": int(metrics["matrix"][(label, predicted)])
+        for label in LABELS
+        for predicted in LABELS
+    }
+    errors = [
+        {
+            "id": error.id,
+            "label": error.label,
+            "predicted": error.predicted,
+            "stage": error.stage,
+            "confidence": error.confidence,
+            "reason": error.reason,
+            "note": error.note,
+        }
+        for error in metrics["errors"]
+    ]
+    return {
+        "run_utc": timestamp,
+        "model": settings.model,
+        "base_url": settings.base_url,
+        "duration_s": round(float(duration_s), 3),
+        "llm_calls": int(call_stats.calls),
+        "mean_latency_s": round(float(call_stats.mean_latency_s), 4),
+        "usage_reported": bool(call_stats.usage_reported),
+        "prompt_tokens": int(call_stats.prompt_tokens),
+        "completion_tokens": int(call_stats.completion_tokens),
+        "total_tokens": int(call_stats.total_tokens),
+        "tp": int(metrics["tp"]),
+        "fp": int(metrics["fp"]),
+        "fn": int(metrics["fn"]),
+        "tn": int(metrics["tn"]),
+        "precision": float(metrics["precision"]),
+        "recall": float(metrics["recall"]),
+        "f1": float(metrics["f1"]),
+        "matrix": matrix,
+        "errors": errors,
+    }
+
+
+def load_live_runs(path: Path) -> list[dict[str, Any]]:
+    if not path.is_file():
+        return []
+    match = LIVE_RUNS_PATTERN.search(path.read_text(encoding="utf-8"))
+    if not match:
+        return []
+    try:
+        payload = json.loads(match.group(1))
+    except ValueError:
+        return []
+    if not isinstance(payload, list):
+        return []
+    return [item for item in payload if isinstance(item, dict)]
+
+
+def _format_tokens_cell(run: dict[str, Any]) -> str:
+    if not run.get("usage_reported"):
+        return "not returned by API"
+    return f"{run['prompt_tokens']} / {run['completion_tokens']} / {run['total_tokens']}"
+
+
+def render_live_markdown(
+    runs: list[dict[str, Any]],
+    *,
+    settings: LLMSettings,
+    pairs: list[EvalPair],
+) -> str:
+    if not runs:
+        raise ValueError("render_live_markdown requires at least one run")
+    counts = Counter(str(pair.label) for pair in pairs)
+    label_counts = ", ".join(f"{label}={counts.get(label, 0)}" for label in LABELS)
+    latest = runs[-1]
+    n = len(runs)
+    mean_precision = sum(float(r["precision"]) for r in runs) / n
+    mean_recall = sum(float(r["recall"]) for r in runs) / n
+    mean_f1 = sum(float(r["f1"]) for r in runs) / n
+    mean_tp = sum(int(r["tp"]) for r in runs) / n
+    mean_fp = sum(int(r["fp"]) for r in runs) / n
+    mean_fn = sum(int(r["fn"]) for r in runs) / n
+    mean_tn = sum(int(r["tn"]) for r in runs) / n
+    mean_errors = sum(len(r["errors"]) for r in runs) / n
+    mean_calls = sum(int(r["llm_calls"]) for r in runs) / n
+    mean_duration = sum(float(r["duration_s"]) for r in runs) / n
+    mean_latency = sum(float(r["mean_latency_s"]) for r in runs) / n
+
+    usage_runs = [r for r in runs if r.get("usage_reported")]
+    if usage_runs:
+        u_count = len(usage_runs)
+        mean_prompt = round(sum(int(r["prompt_tokens"]) for r in usage_runs) / u_count)
+        mean_completion = round(sum(int(r["completion_tokens"]) for r in usage_runs) / u_count)
+        mean_total_tok = round(sum(int(r["total_tokens"]) for r in usage_runs) / u_count)
+        mean_tokens_cell = f"{mean_prompt} / {mean_completion} / {mean_total_tok}"
+        total_prompt = sum(int(r["prompt_tokens"]) for r in usage_runs)
+        total_completion = sum(int(r["completion_tokens"]) for r in usage_runs)
+        total_tok = sum(int(r["total_tokens"]) for r in usage_runs)
+        token_summary_note = (
+            f"- Token usage across {u_count} run(s): input={total_prompt}, "
+            f"output={total_completion}, total={total_tok} "
+            f"(mean per run: {mean_prompt} in / {mean_completion} out / {mean_total_tok} total; "
+            "API dollar costs are not estimated)."
+        )
+    else:
+        mean_tokens_cell = "not returned by API"
+        token_summary_note = (
+            "- Token usage: the API endpoint did not return input/output token counts "
+            "(costs are not estimated)."
+        )
+
+    lines = [
+        "# Splitbrain — live brain evaluation",
+        "",
+        f"- Latest run (UTC): {latest['run_utc']}",
+        "- LLM mode: `live`",
+        f"- Model: `{latest['model']}`",
+        f"- Endpoint (Base URL): `{latest['base_url']}`",
+        f"- Dataset: `eval/dataset.jsonl` — {len(pairs)} pairs ({label_counts})",
+        f"- Runs recorded: {n}",
+        "- Pipeline: prefilter -> extraction -> matching -> classification -> candidate "
+        "(threshold 0.7), identical to the Sentinel.",
+        token_summary_note,
+        "",
+        "## Summary across live runs",
+        "",
+        "| run | UTC | precision | recall | F1 | TP / FP / FN / TN | errors | LLM calls | "
+        "total time | mean latency / call | tokens (in / out / total) |",
+        "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |",
+    ]
+    for idx, run in enumerate(runs, start=1):
+        lines.append(
+            f"| {idx} | {run['run_utc']} | {run['precision']:.3f} | {run['recall']:.3f} | "
+            f"{run['f1']:.3f} | {run['tp']} / {run['fp']} / {run['fn']} / {run['tn']} | "
+            f"{len(run['errors'])} | {run['llm_calls']} | {run['duration_s']:.2f}s | "
+            f"{run['mean_latency_s']:.3f}s | {_format_tokens_cell(run)} |"
+        )
+    lines.append(
+        f"| **Mean** | — | **{mean_precision:.3f}** | **{mean_recall:.3f}** | "
+        f"**{mean_f1:.3f}** | {mean_tp:.1f} / {mean_fp:.1f} / {mean_fn:.1f} / {mean_tn:.1f} | "
+        f"{mean_errors:.1f} | {mean_calls:.1f} | {mean_duration:.2f}s | "
+        f"{mean_latency:.3f}s | {mean_tokens_cell} |"
+    )
+    lines.append("")
+
+    pair_by_id = {pair.id: pair for pair in pairs}
+    for idx, run in enumerate(runs, start=1):
+        if run.get("usage_reported"):
+            token_line = (
+                f"- Token usage: input={run['prompt_tokens']}, "
+                f"output={run['completion_tokens']}, total={run['total_tokens']} "
+                "(costs are not estimated)"
+            )
+        else:
+            token_line = "- Token usage: not returned by the API endpoint (costs are not estimated)"
+        lines += [
+            f"## Run {idx} — {run['run_utc']}",
+            "",
+            f"- Run (UTC): {run['run_utc']}",
+            f"- Model: `{run['model']}`",
+            f"- Endpoint (Base URL): `{run['base_url']}`",
+            f"- Total run time: {run['duration_s']:.2f}s",
+            f"- LLM calls: {run['llm_calls']} (mean latency {run['mean_latency_s']:.3f}s per call)",
+            token_line,
+            "",
+            "### Metrics for `contradiction`",
+            "",
+            "| metric | value |",
+            "| --- | --- |",
+            f"| precision | {run['precision']:.3f} |",
+            f"| recall | {run['recall']:.3f} |",
+            f"| F1 | {run['f1']:.3f} |",
+            f"| TP / FP / FN / TN | {run['tp']} / {run['fp']} / {run['fn']} / {run['tn']} |",
+            "",
+            "### Confusion matrix",
+            "",
+            "| label \\ predicted | " + " | ".join(LABELS) + " |",
+            "| --- | " + " | ".join("---" for _ in LABELS) + " |",
+        ]
+        matrix = run["matrix"]
+        for label in LABELS:
+            cells = " | ".join(str(matrix.get(f"{label}:{predicted}", 0)) for predicted in LABELS)
+            lines.append(f"| {label} | {cells} |")
+        errors = run["errors"]
+        lines += ["", f"### Errors ({len(errors)})", ""]
+        if not errors:
+            lines.append("None.")
+            lines.append("")
+        for error in errors:
+            pair = pair_by_id.get(error["id"])
+            confidence = (
+                f", confidence={error['confidence']:.2f}"
+                if error.get("confidence") is not None
+                else ""
+            )
+            lines += [
+                f"#### {error['id']} — label `{error['label']}`, predicted `{error['predicted']}`",
+                "",
+                f"- Stage: `{error['stage']}`{confidence}",
+                f"- Reason: {error['reason']}",
+                f"- Note: {error['note']}",
+            ]
+            if pair is not None:
+                lines += [
+                    f"- A (#{pair.a.room}, {pair.a.author}): {pair.a.text}",
+                    f"- B (#{pair.b.room}, {pair.b.author}): {pair.b.text}",
+                ]
+            lines.append("")
+
+    serialized = json.dumps(runs, separators=(",", ":"))
+    lines += [f"<!-- splitbrain-live-runs {serialized} -->", ""]
+    return redact("\n".join(lines), (settings.api_key,))
+
+
 async def run(
     mode: str | None = None,
     *,
     overwrite: bool = True,
     write_report: bool = True,
+    reset_live: bool = False,
+    transport: LLMTransport | None = None,
 ) -> dict[str, Any]:
     settings = LLMSettings.load(mode=resolve_mode(mode))
     pairs = load_dataset(settings.eval_dir / "dataset.jsonl")
@@ -252,9 +475,11 @@ async def run(
         mode=settings.mode,
         overwrite=overwrite,
     )
-    llm = LLMClient(settings, cassettes)
+    llm = LLMClient(settings, cassettes, transport=transport)
     brain = Brain(llm)
     results: list[PairResult] = []
+    run_utc = datetime.now(UTC).isoformat(timespec="seconds")
+    started = time.monotonic()
     try:
         for index, pair in enumerate(pairs, start=1):
             result = await brain.analyze_pair(pair)
@@ -266,28 +491,67 @@ async def run(
             )
     finally:
         await llm.aclose()
+    duration_s = time.monotonic() - started
+    call_stats = llm.stats()
 
     metrics = compute_metrics(results)
+    metrics["duration_s"] = duration_s
+    metrics["llm_calls"] = call_stats.calls
+    metrics["mean_latency_s"] = call_stats.mean_latency_s
+    metrics["usage_reported"] = call_stats.usage_reported
+    metrics["prompt_tokens"] = call_stats.prompt_tokens
+    metrics["completion_tokens"] = call_stats.completion_tokens
+    metrics["total_tokens"] = call_stats.total_tokens
+
     print()
     print_report(metrics, results)
+    if settings.mode == "live":
+        tokens_str = (
+            f"in={call_stats.prompt_tokens} out={call_stats.completion_tokens} "
+            f"total={call_stats.total_tokens}"
+            if call_stats.usage_reported
+            else "not reported by API"
+        )
+        print(
+            f"Timing: total={duration_s:.2f}s | calls={call_stats.calls} | "
+            f"mean_latency={call_stats.mean_latency_s:.3f}s | tokens: {tokens_str}"
+        )
 
     if write_report:
-        output = settings.eval_dir / "results.md"
-        previous = _previous_run(output)
-        identical = _same_numbers(previous, metrics, settings.mode)
-        previous_mode = previous[0] if previous else None
-        output.parent.mkdir(parents=True, exist_ok=True)
-        output.write_text(
-            render_markdown(
+        if settings.mode == "live":
+            output = settings.eval_dir / "results-live.md"
+            previous_runs = [] if reset_live else load_live_runs(output)
+            current_record = build_live_run_record(
                 metrics,
                 settings=settings,
-                pairs=pairs,
-                cassette_counts=_cassette_counts(settings.cassettes_dir),
-                previous_mode=previous_mode,
-                identical=identical,
-                marker=_marker(metrics, settings.mode),
-            ),
-            encoding="utf-8",
-        )
-        print(f"\nWrote {output.relative_to(settings.eval_dir.parent)}")
+                duration_s=duration_s,
+                call_stats=call_stats,
+                run_utc=run_utc,
+            )
+            all_runs = [*previous_runs, current_record]
+            output.parent.mkdir(parents=True, exist_ok=True)
+            output.write_text(
+                render_live_markdown(all_runs, settings=settings, pairs=pairs),
+                encoding="utf-8",
+            )
+            print(f"\nWrote {output.relative_to(settings.eval_dir.parent)} (run {len(all_runs)})")
+        else:
+            output = settings.eval_dir / "results.md"
+            previous = _previous_run(output)
+            identical = _same_numbers(previous, metrics, settings.mode)
+            previous_mode = previous[0] if previous else None
+            output.parent.mkdir(parents=True, exist_ok=True)
+            output.write_text(
+                render_markdown(
+                    metrics,
+                    settings=settings,
+                    pairs=pairs,
+                    cassette_counts=_cassette_counts(settings.cassettes_dir),
+                    previous_mode=previous_mode,
+                    identical=identical,
+                    marker=_marker(metrics, settings.mode),
+                ),
+                encoding="utf-8",
+            )
+            print(f"\nWrote {output.relative_to(settings.eval_dir.parent)}")
     return metrics

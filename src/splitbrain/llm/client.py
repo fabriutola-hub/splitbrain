@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 import json
 import time
+from dataclasses import dataclass
 from typing import Any, Protocol, TypeVar, runtime_checkable
 
 import httpx
@@ -26,6 +27,23 @@ MIN_INTERVAL_S = 0.35
 
 class LLMResponseError(SplitbrainError):
     """The endpoint returned a status or a body we cannot use; fail loud."""
+
+
+@dataclass(frozen=True, slots=True)
+class LLMCallStats:
+    """Per-client call count, HTTP latency and token usage reported by the API."""
+
+    calls: int = 0
+    mean_latency_s: float = 0.0
+    total_latency_s: float = 0.0
+    prompt_tokens: int = 0
+    completion_tokens: int = 0
+    total_tokens: int = 0
+    usage_calls: int = 0
+
+    @property
+    def usage_reported(self) -> bool:
+        return self.usage_calls > 0
 
 
 @runtime_checkable
@@ -52,6 +70,11 @@ class HttpTransport:
         self._owns_client = client is None
         self._client = client or internet_client(timeout=httpx.Timeout(90.0))
         self._last_call = 0.0
+        self.call_latencies_s: list[float] = []
+        self.prompt_tokens = 0
+        self.completion_tokens = 0
+        self.total_tokens = 0
+        self.usage_calls = 0
 
     async def _throttle(self) -> None:
         elapsed = time.monotonic() - self._last_call
@@ -65,6 +88,29 @@ class HttpTransport:
             return min(float(header), 30.0)
         except ValueError:
             return min(1.5 * (2**attempt), 20.0)
+
+    def _record_usage(self, envelope: dict[str, Any]) -> None:
+        usage = envelope.get("usage")
+        if not isinstance(usage, dict):
+            return
+        prompt = usage.get("prompt_tokens", usage.get("input_tokens"))
+        completion = usage.get("completion_tokens", usage.get("output_tokens"))
+        total = usage.get("total_tokens")
+        if (
+            isinstance(prompt, int)
+            and not isinstance(prompt, bool)
+            and isinstance(completion, int)
+            and not isinstance(completion, bool)
+        ):
+            self.prompt_tokens += prompt
+            self.completion_tokens += completion
+            total_val = (
+                total
+                if isinstance(total, int) and not isinstance(total, bool)
+                else prompt + completion
+            )
+            self.total_tokens += total_val
+            self.usage_calls += 1
 
     async def chat_json(self, system: str, user: str) -> dict[str, Any]:
         payload: dict[str, Any] = {
@@ -82,11 +128,14 @@ class HttpTransport:
         response: httpx.Response | None = None
         for attempt in range(MAX_TRANSPORT_RETRIES + 1):
             await self._throttle()
+            started = time.monotonic()
             response = await self._client.post(
                 f"{self.settings.base_url}/chat/completions", json=payload, headers=headers
             )
-            self._last_call = time.monotonic()
+            now = time.monotonic()
+            self._last_call = now
             if response.status_code not in RETRY_STATUSES or attempt == MAX_TRANSPORT_RETRIES:
+                self.call_latencies_s.append(now - started)
                 break
             await asyncio.sleep(self._retry_delay(response, attempt))
         assert response is not None
@@ -110,6 +159,7 @@ class HttpTransport:
             raise LLMResponseError(f"LLM response is not valid JSON: {body}") from exc
         if not isinstance(parsed, dict):
             raise LLMResponseError(f"LLM response is not a JSON object: {body}")
+        self._record_usage(envelope)
         return parsed
 
     async def aclose(self) -> None:
@@ -135,6 +185,7 @@ class LLMClient:
         self.cassettes = cassettes
         self.mode = settings.mode
         self._transport = transport
+        self._fallback_latencies: list[float] = []
 
     @property
     def _live(self) -> LLMTransport:
@@ -146,6 +197,34 @@ class LLMClient:
             self._transport = HttpTransport(self.settings)
         return self._transport
 
+    async def _call_live(self, system: str, user: str) -> dict[str, Any]:
+        started = time.monotonic()
+        result = await self._live.chat_json(system, user)
+        self._fallback_latencies.append(time.monotonic() - started)
+        return result
+
+    def stats(self) -> LLMCallStats:
+        transport = self._transport
+        latencies = getattr(transport, "call_latencies_s", None)
+        if not isinstance(latencies, list):
+            latencies = self._fallback_latencies
+        calls = len(latencies)
+        total_latency = float(sum(latencies))
+        mean_latency = total_latency / calls if calls else 0.0
+        prompt_tokens = int(getattr(transport, "prompt_tokens", 0) or 0)
+        completion_tokens = int(getattr(transport, "completion_tokens", 0) or 0)
+        total_tokens = int(getattr(transport, "total_tokens", 0) or 0)
+        usage_calls = int(getattr(transport, "usage_calls", 0) or 0)
+        return LLMCallStats(
+            calls=calls,
+            mean_latency_s=mean_latency,
+            total_latency_s=total_latency,
+            prompt_tokens=prompt_tokens,
+            completion_tokens=completion_tokens,
+            total_tokens=total_tokens,
+            usage_calls=usage_calls,
+        )
+
     async def structured(
         self,
         system: str,
@@ -155,7 +234,7 @@ class LLMClient:
         context: dict[str, Any] | None = None,
     ) -> SchemaT:
         validation_context = context or {}
-        raw = await self._live.chat_json(system, user)
+        raw = await self._call_live(system, user)
         try:
             return schema.model_validate(raw, context=validation_context)
         except ValidationError as exc:
@@ -163,7 +242,7 @@ class LLMClient:
                 f"{user}\n\nVALIDATION ERROR IN YOUR PREVIOUS RESPONSE:\n{_brief(exc)}\n"
                 "Return the corrected JSON object only."
             )
-            retry = await self._live.chat_json(system, repair)
+            retry = await self._call_live(system, repair)
             try:
                 return schema.model_validate(retry, context=validation_context)
             except ValidationError as second:
