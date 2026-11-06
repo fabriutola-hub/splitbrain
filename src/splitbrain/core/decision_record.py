@@ -6,18 +6,23 @@ editing another agent's document. The human record stays readable without JSON.
 
 from __future__ import annotations
 
+import json
+import logging
 from dataclasses import dataclass
 from typing import Any, Literal
 
 from pydantic import BaseModel, Field, model_validator
 
-from ..switch.client import SwitchAgent
+from ..switch.client import SwitchAgent, SwitchOpError
 from .decision import DecisionMachine, DecisionSnapshot, DecisionState
 from .protocol import CandidatePacket, DecidedPacket, OriginRef
 
 STATE_PREFIX = "\n\nSplitbrain state: "
 PROGRESS_PREFIX = "\n\nSplitbrain corrections: "
 CONTEXT_LIMIT = 200
+MISSING_ROOM_CONTEXT = "Not connected to a room. Call connect_to_room first."
+
+logger = logging.getLogger(__name__)
 
 
 class CorrectionProgress(BaseModel):
@@ -118,6 +123,28 @@ def render_record(content: str, state: DecisionRecord) -> str:
     return record_body(content).rstrip() + STATE_PREFIX + state.model_dump_json()
 
 
+async def _load_documents(agent: SwitchAgent, room_id: str, ids: list[str]) -> Any:
+    """Read under the caller's act_in lock; reconnect once for the known context loss."""
+    try:
+        return await agent.op("load_internal_documents", ids=ids)
+    except SwitchOpError as exc:
+        if exc.op != "load_internal_documents" or exc.status != 400:
+            raise
+        try:
+            body = json.loads(exc.body)
+        except json.JSONDecodeError:
+            raise exc from None
+        if not isinstance(body, dict) or body.get("detail") != MISSING_ROOM_CONTEXT:
+            raise
+        logger.warning(
+            "Switch lost room context for %s while loading documents; "
+            "reconnecting and retrying once",
+            room_id,
+        )
+        await agent.op("connect_to_room", room_id=room_id)
+        return await agent.op("load_internal_documents", ids=ids)
+
+
 async def load_decision_records(
     agent: SwitchAgent, room_id: str, candidate_id: str
 ) -> tuple[list[StoredDecision], list[dict[str, Any]]]:
@@ -131,7 +158,7 @@ async def load_decision_records(
             if doc.get("id")
             and (doc.get("name") == base or str(doc.get("name", "")).startswith(base + " ("))
         ]
-        loaded = await agent.op("load_internal_documents", ids=ids) if ids else []
+        loaded = await _load_documents(agent, room_id, ids) if ids else []
     entries = loaded if isinstance(loaded, list) else loaded.get("documents", [])
     if len(entries) != len(ids):
         raise ValueError("A listed decision document could not be loaded; refusing to reopen it")
@@ -180,7 +207,7 @@ async def load_correction_journal(
         if len(ids) != 1:
             raise ValueError("Correction journal is ambiguous")
         document_id = ids[0]
-        loaded = await agent.op("load_internal_documents", ids=[document_id])
+        loaded = await _load_documents(agent, room_id, [document_id])
     entries = loaded if isinstance(loaded, list) else loaded.get("documents", [])
     if len(entries) != 1:
         raise ValueError("Correction journal is missing or ambiguous")
