@@ -1,0 +1,27 @@
+{
+  "input": {
+    "author": "noah",
+    "message_id": "n04-b",
+    "room": "data",
+    "text": "APAC customer data is moving to the Singapore region in December."
+  },
+  "model": "deepseek-ai/DeepSeek-V4.1-Flash-1017",
+  "output": {
+    "claims": [
+      {
+        "confidence": 0.9,
+        "effective_date": null,
+        "kind": "commitment",
+        "polarity": "affirm",
+        "scope": "APAC customers",
+        "scope_key": "apac",
+        "subject": "data residency",
+        "subject_key": "data-region",
+        "value": "moving to Singapore region in December"
+      }
+    ],
+    "message_id": "n04-b"
+  },
+  "recorded_at": "2026-11-06T19:47:25+00:00",
+  "task": "extract"
+}

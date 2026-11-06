@@ -1,0 +1,27 @@
+{
+  "input": {
+    "author": "hana",
+    "message_id": "n20-a",
+    "room": "security",
+    "text": "All EU customer data must stay in the Frankfurt region going forward."
+  },
+  "model": "deepseek-ai/DeepSeek-V4.1-Flash-1017",
+  "output": {
+    "claims": [
+      {
+        "confidence": 0.92,
+        "effective_date": null,
+        "kind": "policy",
+        "polarity": "affirm",
+        "scope": "EU customers",
+        "scope_key": "eu-customers",
+        "subject": "data residency",
+        "subject_key": "data-region",
+        "value": "data stored in Frankfurt region"
+      }
+    ],
+    "message_id": "n20-a"
+  },
+  "recorded_at": "2026-11-06T19:47:31+00:00",
+  "task": "extract"
+}
