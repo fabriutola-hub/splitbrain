@@ -5,7 +5,8 @@ from __future__ import annotations
 from ..llm.cassette import classify_key
 from ..llm.client import LLMClient
 from ..llm.prompts import CLASSIFICATION_SYSTEM, build_classification_user
-from .models import Claim, ClassificationResult, claim_key
+from .classifier_guard import guard_classification
+from .models import Claim, ClassificationResult, Relation, claim_key
 
 
 def claim_view(claim: Claim) -> dict[str, object]:
@@ -45,4 +46,8 @@ class Classifier:
             user=build_classification_user(first, second),
             schema=ClassificationResult,
         )
+        if result.relation == Relation.CONTRADICTION:
+            guarded = guard_classification(claim_a, claim_b)
+            if guarded is not None:
+                return guarded
         return result
