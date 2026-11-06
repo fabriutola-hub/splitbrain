@@ -1,5 +1,7 @@
 ![Splitbrain](docs/assets/banner.jpg)
 
+[![tests](https://github.com/fabriutola-hub/splitbrain/actions/workflows/tests.yml/badge.svg)](https://github.com/fabriutola-hub/splitbrain/actions/workflows/tests.yml)
+
 # Splitbrain
 
 **Splitbrain is a set of agents on Switch that notices when two teams believe incompatible things, verifies it against independent evidence, and brings the two responsible people into one room to decide — before the mistake reaches a customer.**
