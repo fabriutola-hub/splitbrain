@@ -197,7 +197,8 @@ async def test_corrected_appends_the_final_line_and_confirms_in_the_room() -> No
     assert "Corrections posted in #sales, #engineering" in fake.updates[-1]["content"]
     assert fake.posts[-1] == (
         "r-conflict",
-        "Corrections posted in #sales, #engineering.",
+        'Corrections posted in #sales, #engineering; "Customer commitments" '
+        "updated for Acme in #splitbrain-ops (no follow-up task).",
     )
     # A duplicate packet must not append the line twice.
     await arbiter._on_corrected(packet)

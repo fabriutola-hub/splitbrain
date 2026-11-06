@@ -19,6 +19,7 @@ from typing import Any
 from .. import bootstrap
 from ..config import Settings, SplitbrainError
 from ..core.decision import DecisionMachine, DecisionOutcome, DecisionState
+from ..core.followup import closing_summary_line, record_business_followup
 from ..core.models import Decision, Evidence
 from ..core.packets import encode
 from ..core.protocol import (
@@ -38,6 +39,7 @@ from ..core.protocol import (
     VerdictPacket,
     read_packet,
 )
+from ..core.publication import PUBLICATION_NOTICE, public_topic_fields
 from ..core.timefmt import stamp, stamp_iso, zone_label
 from ..switch.client import SwitchAgent, SwitchOpError
 from ..switch.events import (
@@ -810,6 +812,7 @@ class Arbiter:
                 "You two decide. When you agree, one of you writes:  decision: <what you agreed>",
                 "and the other replies:  confirm  (or 'Confirmed', 'agreed', 'de acuerdo', 👍)",
                 "I'll record it and correct both original threads.",
+                PUBLICATION_NOTICE,
             ]
         )
 
@@ -885,16 +888,18 @@ class Arbiter:
             f"{stamp_iso(decision.decided_at)}). "
             "Correcting the original threads now.",
         )
+        await record_business_followup(self, verification, decision)
+        subject, subject_key, scope, scope_key = public_topic_fields(verification.candidate)
         packet = DecidedPacket(
             candidate_id=verification.candidate.id,
             decision=decision,
             conflict_room=verification.room_id or "",
             conflict_room_name=verification.room_name,
             origins=verification.origins,
-            subject=verification.candidate.claim_a.subject,
-            subject_key=verification.candidate.claim_a.subject_key,
-            scope=verification.candidate.claim_a.scope,
-            scope_key=verification.candidate.claim_a.scope_key,
+            subject=subject,
+            subject_key=subject_key,
+            scope=scope,
+            scope_key=scope_key,
             authors=[claim.author for claim in verification.claims],
         )
         await self.agent.targeted(
@@ -932,7 +937,7 @@ class Arbiter:
                 document_id=verification.document_id,
                 content=verification.record,
             )
-        await self.agent.post(verification.room_id, f"{line}.")
+        await self.agent.post(verification.room_id, closing_summary_line(verification, rooms))
         logger.info("%s for %s", line, packet.candidate_id)
 
     async def _on_reminded(self, frame: MessageFrame, packet: RemindedPacket) -> None:
