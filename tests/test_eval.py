@@ -715,3 +715,36 @@ def test_cli_alternative_dataset_replay_exits_with_the_hint_and_no_traceback(
     assert "eval/dataset-v2.jsonl has no recorded cassettes (replay mode)." in captured.err
     assert "Traceback" not in captured.err
     assert "Replay miss" not in captured.err
+
+
+async def test_dataset_flag_with_the_release_dataset_uses_the_release_loader(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.setenv("SPLITBRAIN_ROOT", str(tmp_path))
+    monkeypatch.setenv("SPLITBRAIN_LLM_API_KEY", "secret-live-key")
+    eval_dir = tmp_path / "eval"
+    eval_dir.mkdir()
+    (eval_dir / "dataset.jsonl").write_text("", encoding="utf-8")
+    calls: list[Path] = []
+
+    def spy(path: Path) -> list[EvalPair]:
+        calls.append(path)
+        return [_stub_pair()]
+
+    def no_v2(path: Path) -> list[EvalPairV2]:
+        raise AssertionError("v2 loader must not run for eval/dataset.jsonl")
+
+    monkeypatch.setattr(evaluation, "load_dataset", spy)
+    monkeypatch.setattr(evaluation, "load_dataset_v2", no_v2)
+    await run(
+        "live",
+        dataset="eval/dataset.jsonl",
+        reset_live=True,
+        transport=_FakeEvalTransport(report_usage=True),
+    )
+
+    assert calls == [eval_dir / "dataset.jsonl"]
+    assert "1 pairs from eval/dataset.jsonl" in capsys.readouterr().out
+    report = (eval_dir / "results-live.md").read_text(encoding="utf-8")
+    assert "- Dataset: `eval/dataset.jsonl`" in report
+    assert not (eval_dir / "results-v2-live.md").exists()

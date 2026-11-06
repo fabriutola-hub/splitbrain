@@ -12,7 +12,7 @@ from . import bootstrap, demo, evaluation, recording, seed, stack
 from .agents import arbiter as arbiter_agent
 from .agents import sentinel as sentinel_agent
 from .agents import verifier as verifier_agent
-from .config import Settings, SplitbrainError
+from .config import Paths, Settings, SplitbrainError
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -70,8 +70,8 @@ def build_parser() -> argparse.ArgumentParser:
         help="register agents, people and rooms (idempotent)",
         description=(
             "Register the four agents, create the Mattermost demo users, turn off agent "
-            "greetings, open their addressing policies, provision the room group from "
-            "the YAML template, attach the GitHub reference and print the demo logins. "
+            "greetings, open their addressing policies, provision the room groups from "
+            "the YAML templates, attach the GitHub reference and print the demo logins. "
             "Running it twice changes nothing."
         ),
     )
@@ -175,10 +175,11 @@ def build_parser() -> argparse.ArgumentParser:
         "eval",
         help="run the labeled eval dataset and write eval/results.md",
         description=(
-            "Run the 44 labeled pairs in eval/dataset.jsonl through the same "
-            "prefilter, extraction, matching and classification pipeline the Sentinel "
-            "uses. Print precision, recall, F1 and the confusion matrix for "
-            "'contradiction', list every error and write eval/results.md."
+            "Run the labeled pairs in eval/dataset.jsonl (or the file passed to --dataset) "
+            "through the same prefilter, extraction, matching and classification pipeline "
+            "the Sentinel uses. Print precision, recall, F1 and the confusion matrix for "
+            "'contradiction', list every error and write eval/results.md (with --dataset, "
+            "eval/results-<suffix>.md or eval/results-<suffix>-live.md)."
         ),
     )
     eval_parser.add_argument(
@@ -217,6 +218,14 @@ async def _dispatch(args: argparse.Namespace) -> int:
         else:
             await recording.record_all()
         return 0
+    if args.command == "seed":
+        # Validate the scenario before Settings.load so a typo names the scenario,
+        # not a missing deploy/.env, on a clean clone.
+        seed.validate_scenario(Paths.default().root, args.scenario, auto_decide=args.auto_decide)
+    if args.command == "run" and args.tui and args.agent != "sentinel":
+        raise SplitbrainError(
+            "--tui is only available for the Sentinel; run 'splitbrain run sentinel --tui'."
+        )
     if args.command == "demo":
         demo.validate_options(
             scenario=args.scenario,

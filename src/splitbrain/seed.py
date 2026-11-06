@@ -86,14 +86,22 @@ class DecisionHooks(Protocol):
 
 
 def scenario_path(settings: Settings, name: str) -> Path:
-    folder = settings.paths.root / SCENARIO_DIR
+    return _scenario_path(settings.paths.root, name)
+
+
+def _scenario_path(root: Path, name: str) -> Path:
+    folder = root / SCENARIO_DIR
     if not name or not name.replace("-", "").replace("_", "").isalnum():
         raise SplitbrainError(f"Invalid scenario name: {name!r}")
     return folder / f"{name}.yaml"
 
 
 def load_scenario(settings: Settings, name: str) -> Scenario:
-    path = scenario_path(settings, name)
+    return load_scenario_at(settings.paths.root, name)
+
+
+def load_scenario_at(root: Path, name: str) -> Scenario:
+    path = _scenario_path(root, name)
     if not path.is_file():
         available = ", ".join(sorted(p.stem for p in path.parent.glob("*.yaml"))) or "none"
         raise SplitbrainError(f"Unknown scenario {name!r}. Available: {available}.")
@@ -114,6 +122,16 @@ def load_scenario(settings: Settings, name: str) -> Scenario:
     unknown = sorted({message.person for message in scenario.messages} - set(scenario.people))
     if unknown:
         raise SplitbrainError(f"{path} uses people missing from 'people': {', '.join(unknown)}")
+    return scenario
+
+
+def validate_scenario(root: Path, name: str, *, auto_decide: bool = False) -> Scenario:
+    """Check the scenario before Switch settings are needed, for a clear CLI error."""
+    scenario = load_scenario_at(root, name)
+    if auto_decide and scenario.decision is None:
+        raise SplitbrainError(
+            f"Scenario {name!r} has no 'decision:' block, so --auto-decide cannot close a conflict."
+        )
     return scenario
 
 
