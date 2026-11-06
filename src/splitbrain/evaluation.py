@@ -19,8 +19,9 @@ from pydantic import field_validator
 
 from .config import LLM_MODES, LLMSettings, SplitbrainError, redact
 from .core.models import EvalPair
-from .core.pipeline import Brain, PairResult
-from .llm.cassette import CassetteStore
+from .core.pipeline import Brain, PairResult, message_from_side
+from .core.prefilter import prefilter
+from .llm.cassette import CassetteStore, ReplayMiss, extract_key
 from .llm.client import LLMCallStats, LLMClient, LLMTransport
 
 LABELS: tuple[str, ...] = ("contradiction", "update", "compatible", "unrelated")
@@ -108,6 +109,35 @@ def resolve_dataset(settings: LLMSettings, dataset: str | Path | None) -> tuple[
     if suffix and not suffix.startswith("-"):
         suffix = f"-{suffix}"
     return source, display, suffix
+
+
+def alternative_replay_hint(display: str, suffix: str, eval_dir: Path) -> str:
+    """One short line of guidance instead of a raw ReplayMiss for an unrecorded dataset."""
+    message = (
+        f"{display} has no recorded cassettes (replay mode). "
+        "Run it live: put SPLITBRAIN_LLM_API_KEY in .env.local and use --mode live."
+    )
+    if suffix:
+        live_report = eval_dir / f"results{suffix}-live.md"
+        runs = load_live_runs(live_report)
+        if runs:
+            noun = "run" if len(runs) == 1 else "runs"
+            message += f" Results of {len(runs)} live {noun} are in eval/{live_report.name}."
+    return message
+
+
+def _missing_extract_cassettes(pairs: list[EvalPair], cassettes: CassetteStore) -> bool:
+    """True when a pair that would reach extraction has no recorded response."""
+    for pair in pairs:
+        messages = (
+            message_from_side(pair.id, pair.a, "a", 1),
+            message_from_side(pair.id, pair.b, "b", 2),
+        )
+        if not all(prefilter(message).keep for message in messages):
+            continue
+        if any(not cassettes.has("extract", extract_key(message.text)) for message in messages):
+            return True
+    return False
 
 
 def _dataset_extra_lines(pairs: list[EvalPair]) -> list[str]:
@@ -536,18 +566,24 @@ async def run(
 ) -> dict[str, Any]:
     settings = LLMSettings.load(mode=resolve_mode(mode))
     source, display, suffix = resolve_dataset(settings, dataset)
-    pairs = load_dataset_v2(source) if dataset is not None else load_dataset(source)
-    print(f"splitbrain eval — {len(pairs)} pairs from {display}")
-    print(f"LLM: mode={settings.mode} | model={settings.model} | base_url={settings.base_url}")
-    if settings.mode == "replay":
-        print("[DEGRADED] replay: reading recorded responses only, no network calls.")
-
+    release_dataset = (settings.eval_dir / "dataset.jsonl").resolve()
+    is_release_dataset = source.resolve() == release_dataset
+    pairs = load_dataset(source) if is_release_dataset else load_dataset_v2(source)
     cassettes = CassetteStore(
         settings.cassettes_dir,
         model=settings.model,
         mode=settings.mode,
         overwrite=overwrite,
     )
+    alternative_replay = settings.mode == "replay" and not is_release_dataset
+    hint = alternative_replay_hint(display, suffix, settings.eval_dir) if alternative_replay else ""
+    if alternative_replay and _missing_extract_cassettes(pairs, cassettes):
+        raise SplitbrainError(hint)
+    print(f"splitbrain eval — {len(pairs)} pairs from {display}")
+    print(f"LLM: mode={settings.mode} | model={settings.model} | base_url={settings.base_url}")
+    if settings.mode == "replay":
+        print("[DEGRADED] replay: reading recorded responses only, no network calls.")
+
     llm = LLMClient(settings, cassettes, transport=transport)
     brain = Brain(llm)
     results: list[PairResult] = []
@@ -562,6 +598,10 @@ async def run(
                 f"[{index:02d}/{len(pairs)}] {result.id} predicted={result.predicted} "
                 f"label={result.label} {mark}"
             )
+    except ReplayMiss as exc:
+        if alternative_replay:
+            raise SplitbrainError(hint) from exc
+        raise
     finally:
         await llm.aclose()
     duration_s = time.monotonic() - started
