@@ -6,7 +6,9 @@
 
 Sales promises Acme that SSO will be live on December 1, in a public channel. Engineering pulls SSO out of Q4, in a private channel. Nobody is a member of both rooms, so nobody sees both statements. The Sentinel is: it listens to every room over a `scope=all&filter=all` event stream, records both claims, and the other two agents convene the only people who can resolve the difference.
 
-<!-- GIF: docs/assets/demo.gif (recorded by Fabrizio) -->
+![Splitbrain opens a private room for the two people who disagree](docs/assets/demo.gif)
+
+*From the demo video, built from a real run (Mattermost + Switch 0.31): the Arbiter opens the private room `conflict-sb-9637-sso` for exactly the two people involved and posts the brief with both quotes and the GitHub evidence.*
 
 ![Private conflict room in Mattermost](docs/assets/screens/conflict-room.png)
 
@@ -221,7 +223,7 @@ Honest scope of the demo:
 ## Built with
 
 - **Switch 0.31.0** (SandboxAQ) — rooms, roles, references, documents, targeted messages, Gateway and the bridges. Pinned in `deploy/.env.example` and `src/splitbrain/config.py`.
-- **WorkBuddy + Tencent Hy4** wrote the code and this README; **Gemini 4 Argon** (Antigravity) finished the last polish round. **Claude** (Anthropic) orchestrated the build: it wrote the specifications, reviewed every change and ran the end-to-end verification.
+- **WorkBuddy + Tencent Hy4** wrote the code and this README; **Gemini 4 Argon** (Antigravity) finished the last polish round and built the demo video in code (HyperFrames + GSAP, from real captures of the product). **Claude** (Anthropic) orchestrated the build: it wrote the specifications and the video storyboard, captured the footage, reviewed every change and every video frame, ran the end-to-end verification and finished the video render and mix.
 - **Fictional data.** Acme, María, Tomás, Lucía, Pablo, Fabrizio and the "Acme roadmap" issues in `https://github.com/fabriutola-hub/splitbrain-demo-roadmap` were invented for this hackathon. The hackathon quotes are paraphrases of two public announcement pages.
 - **Apache-2.0** — see `LICENSE`. Python 3.12+, `uv`, `httpx`, `pydantic`, `rich`, `rapidfuzz` (`pyproject.toml`, `uv.lock`).
 
@@ -230,7 +232,7 @@ Honest scope of the demo:
 ```
 README.md  LICENSE  Makefile  pyproject.toml  uv.lock
 deploy/            .env.example (pinned, POSTGRES_HOST_PORT=55432), docker-compose.yml (upstream standalone)
-docs/              assets/ (banner, emblems, lockups, blog cover, screens/)
+docs/              assets/ (banner, emblems, lockups, blog cover, demo.gif, screens/)
 src/splitbrain/
   cli.py  config.py  stack.py  bootstrap.py  demo.py  seed.py  evaluation.py  recording.py  tui.py
   switch/            sse.py  events.py  client.py  gateway.py  mattermost.py
