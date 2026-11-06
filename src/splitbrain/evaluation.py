@@ -13,7 +13,9 @@ import time
 from collections import Counter
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
+
+from pydantic import field_validator
 
 from .config import LLM_MODES, LLMSettings, SplitbrainError, redact
 from .core.models import EvalPair
@@ -24,6 +26,7 @@ from .llm.client import LLMCallStats, LLMClient, LLMTransport
 LABELS: tuple[str, ...] = ("contradiction", "update", "compatible", "unrelated")
 METRIC_MARKER = "<!-- splitbrain-metrics {content} -->"
 LIVE_RUNS_PATTERN = re.compile(r"<!-- splitbrain-live-runs (.*?) -->", re.DOTALL)
+V2_KEYS = frozenset({"id", "a", "b", "label", "note", "lang", "tags"})
 
 
 def resolve_mode(cli_mode: str | None) -> str:
@@ -50,6 +53,70 @@ def load_dataset(path: Path) -> list[EvalPair]:
     if not pairs:
         raise SplitbrainError(f"Evaluation dataset is empty: {path}")
     return pairs
+
+
+class EvalPairV2(EvalPair):
+    """An unseen-cases pair: the original contract plus language and slice tags."""
+
+    lang: Literal["en", "es", "mixed"]
+    tags: list[str]
+
+    @field_validator("tags")
+    @classmethod
+    def _tags_are_useful(cls, value: list[str]) -> list[str]:
+        if not value or any(not tag.strip() for tag in value):
+            raise ValueError("tags must be a non-empty list of non-empty strings")
+        return value
+
+
+def load_dataset_v2(path: Path) -> list[EvalPairV2]:
+    if not path.is_file():
+        raise SplitbrainError(f"Evaluation dataset is missing: {path}")
+    pairs: list[EvalPairV2] = []
+    for number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
+        if not line.strip():
+            continue
+        try:
+            raw = json.loads(line)
+            if not isinstance(raw, dict) or set(raw) != V2_KEYS:
+                raise ValueError("expected id, a, b, label, note, lang and tags")
+            pairs.append(EvalPairV2.model_validate(raw))
+        except ValueError as exc:
+            raise SplitbrainError(f"{path}:{number} is not a valid v2 eval pair: {exc}") from exc
+    if not pairs:
+        raise SplitbrainError(f"Evaluation dataset is empty: {path}")
+    if len({pair.id for pair in pairs}) != len(pairs):
+        raise SplitbrainError(f"{path}: duplicate pair ids")
+    return pairs
+
+
+def resolve_dataset(settings: LLMSettings, dataset: str | Path | None) -> tuple[Path, str, str]:
+    """Return (path, display name, report suffix); None keeps the release defaults."""
+    if dataset is None:
+        return settings.eval_dir / "dataset.jsonl", "eval/dataset.jsonl", ""
+    given = Path(dataset)
+    if given.is_absolute():
+        source = given
+    else:
+        rooted = settings.eval_dir.parent / given
+        source = rooted if rooted.is_file() else Path.cwd() / given
+    try:
+        display = source.relative_to(settings.eval_dir.parent).as_posix()
+    except ValueError:
+        display = given.as_posix()
+    suffix = source.stem.removeprefix("dataset")
+    if suffix and not suffix.startswith("-"):
+        suffix = f"-{suffix}"
+    return source, display, suffix
+
+
+def _dataset_extra_lines(pairs: list[EvalPair]) -> list[str]:
+    """Only datasets carrying `lang` get an extra line; release reports stay identical."""
+    langs = Counter(str(pair.lang) for pair in pairs if getattr(pair, "lang", None))
+    if not langs:
+        return []
+    mix = ", ".join(f"{lang}={langs[lang]}" for lang in ("en", "es", "mixed") if langs[lang])
+    return [f"- Language mix: {mix}"]
 
 
 def compute_metrics(results: list[PairResult]) -> dict[str, Any]:
@@ -170,6 +237,7 @@ def render_markdown(
     previous_mode: str | None,
     identical: bool,
     marker: str,
+    dataset_name: str = "eval/dataset.jsonl",
 ) -> str:
     label_counts = ", ".join(f"{label}={metrics['labels'].get(label, 0)}" for label in LABELS)
     lines = [
@@ -180,7 +248,8 @@ def render_markdown(
         f"- Model: `{settings.model}`",
         f"- Base URL: `{settings.base_url}`",
         f"- Cassette model: `{_cassette_model(settings.cassettes_dir) or 'n/a'}`",
-        f"- Dataset: `eval/dataset.jsonl` — {len(pairs)} pairs ({label_counts})",
+        f"- Dataset: `{dataset_name}` — {len(pairs)} pairs ({label_counts})",
+        *_dataset_extra_lines(pairs),
         f"- Cassettes: extract={cassette_counts['extract']}, "
         f"classify={cassette_counts['classify']}",
         "- Pipeline: prefilter -> extraction -> matching -> classification -> candidate "
@@ -309,6 +378,7 @@ def render_live_markdown(
     *,
     settings: LLMSettings,
     pairs: list[EvalPair],
+    dataset_name: str = "eval/dataset.jsonl",
 ) -> str:
     if not runs:
         raise ValueError("render_live_markdown requires at least one run")
@@ -358,7 +428,8 @@ def render_live_markdown(
         "- LLM mode: `live`",
         f"- Model: `{latest['model']}`",
         f"- Endpoint (Base URL): `{latest['base_url']}`",
-        f"- Dataset: `eval/dataset.jsonl` — {len(pairs)} pairs ({label_counts})",
+        f"- Dataset: `{dataset_name}` — {len(pairs)} pairs ({label_counts})",
+        *_dataset_extra_lines(pairs),
         f"- Runs recorded: {n}",
         "- Pipeline: prefilter -> extraction -> matching -> classification -> candidate "
         "(threshold 0.7), identical to the Sentinel.",
@@ -457,14 +528,16 @@ def render_live_markdown(
 async def run(
     mode: str | None = None,
     *,
+    dataset: str | Path | None = None,
     overwrite: bool = True,
     write_report: bool = True,
     reset_live: bool = False,
     transport: LLMTransport | None = None,
 ) -> dict[str, Any]:
     settings = LLMSettings.load(mode=resolve_mode(mode))
-    pairs = load_dataset(settings.eval_dir / "dataset.jsonl")
-    print(f"splitbrain eval — {len(pairs)} pairs from eval/dataset.jsonl")
+    source, display, suffix = resolve_dataset(settings, dataset)
+    pairs = load_dataset_v2(source) if dataset is not None else load_dataset(source)
+    print(f"splitbrain eval — {len(pairs)} pairs from {display}")
     print(f"LLM: mode={settings.mode} | model={settings.model} | base_url={settings.base_url}")
     if settings.mode == "replay":
         print("[DEGRADED] replay: reading recorded responses only, no network calls.")
@@ -519,7 +592,7 @@ async def run(
 
     if write_report:
         if settings.mode == "live":
-            output = settings.eval_dir / "results-live.md"
+            output = settings.eval_dir / f"results{suffix}-live.md"
             previous_runs = [] if reset_live else load_live_runs(output)
             current_record = build_live_run_record(
                 metrics,
@@ -531,12 +604,14 @@ async def run(
             all_runs = [*previous_runs, current_record]
             output.parent.mkdir(parents=True, exist_ok=True)
             output.write_text(
-                render_live_markdown(all_runs, settings=settings, pairs=pairs),
+                render_live_markdown(
+                    all_runs, settings=settings, pairs=pairs, dataset_name=display
+                ),
                 encoding="utf-8",
             )
             print(f"\nWrote {output.relative_to(settings.eval_dir.parent)} (run {len(all_runs)})")
         else:
-            output = settings.eval_dir / "results.md"
+            output = settings.eval_dir / f"results{suffix}.md"
             previous = _previous_run(output)
             identical = _same_numbers(previous, metrics, settings.mode)
             previous_mode = previous[0] if previous else None
@@ -550,6 +625,7 @@ async def run(
                     previous_mode=previous_mode,
                     identical=identical,
                     marker=_marker(metrics, settings.mode),
+                    dataset_name=display,
                 ),
                 encoding="utf-8",
             )

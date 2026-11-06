@@ -1,5 +1,7 @@
 ![Splitbrain](docs/assets/banner.jpg)
 
+[![tests](https://github.com/fabriutola-hub/splitbrain/actions/workflows/tests.yml/badge.svg)](https://github.com/fabriutola-hub/splitbrain/actions/workflows/tests.yml)
+
 # Splitbrain
 
 **Splitbrain is a set of agents on Switch that notices when two teams believe incompatible things, verifies it against independent evidence, and brings the two responsible people into one room to decide — before the mistake reaches a customer.**
@@ -15,7 +17,7 @@ A two-minute path through the project:
 | **See it in chat** | Open http://localhost:8065 and log in as `maria` or `tomas` with the password printed in the `DEMO SUMMARY`, which also links to the private conflict room. |
 | **How Switch is used** | [Every Switch feature and the file that uses it](#how-splitbrain-uses-switch): the event stream, agent-created private rooms, an exclusive role with a standby, room documents as the decision record, `link_rooms`, a GitHub reference and one YAML template. Without Switch there is no transport and no shared state. |
 | **What we found in Switch** | [A reproducible race in the exclusive role lease](#what-we-found-in-switch-0310), plus four protocol details that cost us time. |
-| **Does it work** | 459 unit tests, 4 integration tests against a live stack, and a [44-pair evaluation](#evaluation) (replay: precision 1.000, recall 0.889, F1 0.941; 3-run live mean: precision 1.000, recall 0.833, F1 0.909) with its errors listed. |
+| **Does it work** | 478 unit tests, 4 integration tests against a live stack, and two [evaluations](#evaluation): the 44-pair dataset (replay: precision 1.000, recall 0.889, F1 0.941; 3-run live mean: 1.000 / 0.833 / 0.909) and [100 unseen cases](#unseen-cases-v2) (3-run live mean: precision 0.927, recall 0.600, F1 0.728). Both list their errors, including the drop in recall. |
 | **Honest limits** | [Known limits](#known-limits): tested on Windows 11 and on Mattermost only. |
 
 Sales promises Acme that SSO will be live on December 1, in a public channel. Engineering pulls SSO out of Q4, in a private channel. Nobody is a member of both rooms, so nobody sees both statements. The Sentinel is: it listens to every room over a `scope=all&filter=all` event stream, records both claims, and the other two agents convene the only people who can resolve the difference.
@@ -207,6 +209,21 @@ The three errors are real and listed in `eval/results.md`: two false negatives w
 | 3 | 2026-11-06T07:10:45+00:00 | 1.000 | 0.833 | 0.909 | 15 / 0 / 3 / 26 | 4 | 69 | 214.02s | 2.651s | 111529 / 8036 / 119565 |
 | **Mean** | — | **1.000** | **0.833** | **0.909** | 15.0 / 0.0 / 3.0 / 26.0 | 4.0 | 69.0 | 205.32s | 2.589s | 111528 / 8081 / 119609 |
 
+### Unseen cases (v2)
+
+An external review pointed out that the 44 pairs above were all written by us. [`eval/dataset-v2.jsonl`](eval/dataset-v2.jsonl) adds **100 brand-new pairs** (35 contradictions, 15 updates, 25 compatible, 25 unrelated; 30 % Spanish or cross-language) about customers and products that appear nowhere else in the repo. [How they were built and labelled](eval/README-v2.md) is versioned with them: the labels were written before any run and never changed after. Run them with `uv run splitbrain eval --dataset eval/dataset-v2.jsonl --mode live`; the full report, including every error, is [`eval/results-v2-live.md`](eval/results-v2-live.md). No cassettes were recorded for v2.
+
+Three independent live runs (`deepseek-ai/DeepSeek-V4.1-Flash-1017` via `https://api.river.ai/v1`, 2026-11-06):
+
+| run | UTC | precision | recall | F1 | TP / FP / FN / TN | errors | LLM calls | total time | mean latency / call | tokens (in / out / total) |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| 1 | 2026-11-06T07:59:57+00:00 | 0.913 | 0.600 | 0.724 | 21 / 2 / 14 / 63 | 42 | 100 | 287.94s | 2.525s | 161815 / 11892 / 173707 |
+| 2 | 2026-11-06T08:04:47+00:00 | 0.955 | 0.600 | 0.737 | 21 / 1 / 14 / 64 | 42 | 100 | 336.36s | 3.009s | 161814 / 11896 / 173710 |
+| 3 | 2026-11-06T08:10:26+00:00 | 0.913 | 0.600 | 0.724 | 21 / 2 / 14 / 63 | 43 | 100 | 363.69s | 3.257s | 161821 / 11896 / 173717 |
+| **Mean** | — | **0.927** | **0.600** | **0.728** | 21.0 / 1.7 / 14.0 / 63.3 | 42.3 | 100.0 | 329.33s | 2.930s | 161817 / 11895 / 173711 |
+
+These numbers are clearly worse than the 44-pair replay and we are not hiding them: precision stays high (0.927 mean) but recall drops to 0.600, with 42–43 wrong labels per run. Most of the damage happens **before** the model: the vocabulary-based prefilter discards one side of 30 pairs per run as `no commitment signal (pure chatter)` because unseen units (`kg`, `lb`), verbs (`signed`, `capped`) and some Spanish phrasing are not in its signal list. The rest are compatible pairs rejected by the matcher as a different subject and a few genuine classifier mistakes: an own-correction about currency (v044) was read as a contradiction in all three runs, and two different authorized exceptions were misread as contradictions (v060 in run 1, v070 in run 3). The 44-pair numbers describe the workflow we built for; these 100 describe information we did not design for. We left the labels, the prefilter and the model untouched after seeing the results.
+
 ## What we found in Switch 0.31.0
 
 Everything in this section was run against a real local 0.31.0 stack. You can reproduce each finding with the code and the probe script cited below.
@@ -243,7 +260,7 @@ Honest scope of the demo:
 - **A room only convenes people from the same chat app.** Rooms are bridged to one bridge (`bridge_id` in `get_room_detail`); the demo's people are all Mattermost users on the same team.
 - **Switch is pinned to 0.31.0** (`deploy/.env.example`, `src/splitbrain/config.py`). `Settings.load` refuses any other `SWITCH_VERSION` instead of guessing.
 - **No destructive Switch operations exist** in this repo, by design: there is no delete of rooms, roles, references or documents. A `down --wipe` is the way to get a clean stack, and old room names can survive as duplicates if you create rooms by hand.
-- **The classifier misses two global-vs-customer contradictions** (recall 0.889, see Evaluation). The eval dataset is 44 hand-written pairs, not a production benchmark.
+- **The classifier misses two global-vs-customer contradictions** (recall 0.889, see Evaluation). The original eval dataset is 44 hand-written pairs, not a production benchmark; on [100 unseen pairs](#unseen-cases-v2) the live mean recall falls to 0.600, mostly because the vocabulary-based prefilter discards messages whose units, verbs or Spanish phrasing it was not written for.
 
 ## Troubleshooting
 
@@ -263,6 +280,7 @@ Honest scope of the demo:
 
 ```
 README.md  LICENSE  Makefile  pyproject.toml  uv.lock
+.github/workflows/ tests.yml (lint, unit tests and offline replay eval)
 deploy/            .env.example (pinned, POSTGRES_HOST_PORT=55432), docker-compose.yml (upstream standalone)
 docs/              assets/ (banner, emblems, lockups, blog cover, demo.gif, screens/)
 src/splitbrain/
@@ -277,7 +295,8 @@ agents/              sentinel.md  arbiter.md  verifier.md  (role instructions sh
 templates/           splitbrain.template.yaml  hackathon.template.yaml
 seed/                scenarios/{sso,sso-followup,refunds,hackathon,near-misses}.yaml  github_fixture.json  scenario_evidence.json
 cassettes/           extract/  classify/  (committed record/replay responses)
-eval/                dataset.jsonl  results.md
+eval/                dataset.jsonl  dataset-v2.jsonl  results.md  results-live.md
+                     results-v2-live.md  README-v2.md
 scripts/             probe_arbiter_lease.py  record_github_fixture.py  render_tui_svg.py
 tests/               unit tests; integration tests marked `integration`; tui_snapshot_120x32.txt
 ```
