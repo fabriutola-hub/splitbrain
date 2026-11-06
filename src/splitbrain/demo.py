@@ -18,7 +18,7 @@ from typing import Any
 
 import httpx
 
-from . import bootstrap, seed, stack
+from . import bootstrap, demo_faults, seed, stack
 from .agents import sentinel as sentinel_agent
 from .config import (
     LLMSettings,
@@ -32,6 +32,7 @@ from .core.packets import decode
 from .evidence.github import FIXTURE_BANNER
 from .evidence.scenario import ENV_VAR as SCENARIO_EVIDENCE_ENV
 from .evidence.scenario import load_entry
+from .recovery_demo import RecoveryDemo, RecoveryReport
 from .switch.client import SwitchAgent
 
 AGENT_COMMANDS: tuple[tuple[str, tuple[str, ...]], ...] = (
@@ -132,6 +133,8 @@ class Child:
     proc: asyncio.subprocess.Process
     recent: list[str] = field(default_factory=list)
     reader: asyncio.Task[None] | None = None
+    expected_stop: bool = False
+    expected_returncode: int | None = None
 
 
 class AgentGroup:
@@ -142,11 +145,42 @@ class AgentGroup:
     def check(self) -> None:
         for child in self.children:
             if child.proc.returncode is not None:
+                if child.expected_stop or child.proc.returncode == child.expected_returncode:
+                    continue
                 tail = " | ".join(child.recent[-6:])
                 raise SplitbrainError(
                     f"Agent {child.name!r} exited early with code {child.proc.returncode}. "
                     f"Last lines: {tail or '(no output)'}"
                 )
+
+    def child(self, name: str) -> Child:
+        for child in self.children:
+            if child.name == name:
+                return child
+        raise SplitbrainError(f"Recovery expected an agent process named {name!r}")
+
+    async def stop_child(self, name: str) -> None:
+        child = self.child(name)
+        self.check()
+        child.expected_stop = True
+        child.proc.terminate()
+        try:
+            await asyncio.wait_for(child.proc.wait(), timeout=8.0)
+        except TimeoutError:
+            child.proc.kill()
+            await child.proc.wait()
+        print(f"[recovery] stopped {name} (pid {child.proc.pid}).", flush=True)
+
+    async def restart_child(self, name: str, root: Path, env: dict[str, str]) -> Child:
+        previous = self.child(name)
+        if previous.proc.returncode is None:
+            raise SplitbrainError(f"Recovery expected {name!r} to exit before restart")
+        if previous.reader is not None:
+            await asyncio.wait_for(previous.reader, timeout=5.0)
+        argv = dict(AGENT_COMMANDS)[name]
+        child = await _start_child(root, env, name, argv)
+        self.children[self.children.index(previous)] = child
+        return child
 
     async def stop(self) -> None:
         if self.stopped:
@@ -218,13 +252,6 @@ async def _primary_lease_confirmed(
 async def start_agents(
     root: Path, env: dict[str, str], *, settings: Settings, state: bootstrap.BootstrapState
 ) -> AgentGroup:
-    kwargs: dict[str, Any] = {}
-    if sys.platform == "win32":
-        import subprocess
-
-        kwargs["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP
-    else:
-        kwargs["start_new_session"] = True
     children: list[Child] = []
     for name, argv in AGENT_COMMANDS:
         if name == "arbiter-b":
@@ -244,22 +271,36 @@ async def start_agents(
                     flush=True,
                 )
                 await asyncio.sleep(8.0)
-        proc = await asyncio.create_subprocess_exec(
-            sys.executable,
-            "-m",
-            "splitbrain",
-            *argv,
-            cwd=str(root),
-            env=env,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.STDOUT,
-            **kwargs,
-        )
-        child = Child(name=name, proc=proc)
-        child.reader = asyncio.create_task(_pump(child), name=f"demo-log-{name}")
-        children.append(child)
-        print(f"[demo] started {name} (pid {proc.pid})", flush=True)
+        children.append(await _start_child(root, env, name, argv))
     return AgentGroup(children)
+
+
+async def _start_child(root: Path, env: dict[str, str], name: str, argv: tuple[str, ...]) -> Child:
+    kwargs: dict[str, Any] = {}
+    if sys.platform == "win32":
+        import subprocess
+
+        kwargs["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP
+    else:
+        kwargs["start_new_session"] = True
+    child_env = env.copy()
+    if name != "sentinel":
+        child_env.pop(demo_faults.ENV_VAR, None)
+    proc = await asyncio.create_subprocess_exec(
+        sys.executable,
+        "-m",
+        "splitbrain",
+        *argv,
+        cwd=str(root),
+        env=child_env,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.STDOUT,
+        **kwargs,
+    )
+    child = Child(name=name, proc=proc)
+    child.reader = asyncio.create_task(_pump(child), name=f"demo-log-{name}")
+    print(f"[demo] started {name} (pid {proc.pid})", flush=True)
+    return child
 
 
 async def _healthy(settings: Settings) -> bool:
@@ -569,6 +610,14 @@ def print_summary(
     print("=" * 72, flush=True)
 
 
+def validate_options(
+    *, scenario: str, auto_decide: bool, followup: bool = False, recovery: bool = False
+) -> None:
+    for option, enabled in (("--followup", followup), ("--recovery", recovery)):
+        if enabled and (scenario != "sso" or not auto_decide):
+            raise SplitbrainError(f"{option} requires --scenario sso and --auto-decide.")
+
+
 async def run(
     *,
     scenario: str = "sso",
@@ -576,7 +625,11 @@ async def run(
     offline: bool = False,
     keep: bool = False,
     followup: bool = False,
-) -> None:
+    recovery: bool = False,
+) -> RecoveryReport | None:
+    validate_options(
+        scenario=scenario, auto_decide=auto_decide, followup=followup, recovery=recovery
+    )
     if scenario not in seed.ALL_SCENARIOS:
         raise SplitbrainError(f"Unknown demo scenario {scenario!r}")
     paths = Paths.default()
@@ -587,9 +640,11 @@ async def run(
         raise SplitbrainError("--followup requires --scenario sso and --auto-decide.")
     print("=" * 72, flush=True)
     followup_tag = " | followup=yes" if followup else ""
+    recovery_tag = " | recovery=yes" if recovery else ""
     print(
         f"Splitbrain demo: scenario={scenario} | auto-decide={'yes' if effective_auto else 'no'}"
-        f" | offline={'yes' if offline else 'no'} | keep={'yes' if keep else 'no'}{followup_tag}",
+        f" | offline={'yes' if offline else 'no'} | keep={'yes' if keep else 'no'}"
+        f"{followup_tag}{recovery_tag}",
         flush=True,
     )
     modes.print_banners()
@@ -604,14 +659,26 @@ async def run(
     settings, clean_description = await prepare_clean_state(keep=keep)
     modes = replace(modes, clean_state=clean_description)
     state = await bootstrap.run(settings)
-    group = await start_agents(paths.root, child_environment(modes), settings=settings, state=state)
+    env = child_environment(modes)
+    if recovery:
+        env[demo_faults.ENV_VAR] = demo_faults.SENTINEL_AFTER_FIRST
+    group = await start_agents(paths.root, env, settings=settings, state=state)
     observer: SwitchAgent | None = None
+    recovery_demo: RecoveryDemo | None = None
     try:
         observer = await _observer(settings, state)
         ops_id = state.rooms["splitbrain-ops"].room_id
         await _wait_for_agents(group, observer, state)
         existing_conflicts = await seed._conflict_rooms(observer)
-        result = await seed.run(settings, scenario, auto_decide=effective_auto)
+        seed_options: dict[str, Any] = {}
+        if recovery:
+            assert loaded.decision is not None
+            recovery_demo = RecoveryDemo(
+                settings, state, group, observer, paths.root, env, loaded.decision
+            )
+            await recovery_demo.start()
+            seed_options["decision_hooks"] = recovery_demo
+        result = await seed.run(settings, scenario, auto_decide=effective_auto, **seed_options)
         if not effective_auto and loaded.decision is not None:
             # Printed before waiting for the room: consent must be granted first.
             print_consent_instructions(loaded, state, settings)
@@ -668,6 +735,10 @@ async def run(
                 )
             note = "conflict room created with both public-page quotes; no decision requested"
 
+        if recovery_demo is not None and recovery_demo.report is None:
+            raise SplitbrainError(
+                "Recovery expected all three verified outcomes; observed no report"
+            )
         print_summary(
             settings=settings,
             state=state,
@@ -679,7 +750,14 @@ async def run(
             note=note,
             followup_summary=followup_summary,
         )
+        if recovery_demo is not None:
+            assert recovery_demo.report is not None
+            recovery_demo.report.print_summary()
+            return recovery_demo.report
+        return None
     finally:
+        if recovery_demo is not None:
+            await recovery_demo.aclose()
         if observer is not None:
             await observer.aclose()
         await group.stop()
