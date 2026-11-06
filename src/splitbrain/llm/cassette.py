@@ -47,9 +47,9 @@ class ReplayMiss(SplitbrainError):
         self.description = description
         super().__init__(
             f"Replay miss for {task!r} ({description}); expected "
-            f"cassettes/{task}/{key}.json. Set SPLITBRAIN_LLM_API_KEY in .env.local and run "
-            "'SPLITBRAIN_LLM_MODE=record uv run splitbrain eval' (or 'splitbrain record') to "
-            "refresh the cassettes, or pass --mode live."
+            f"cassettes/{task}/{key}.json. Put SPLITBRAIN_LLM_API_KEY in .env.local, then run "
+            "'uv run splitbrain record --missing' to add the cassette, or set "
+            "SPLITBRAIN_LLM_MODE=record in .env.local and rerun, or pass --mode live."
         )
 
 

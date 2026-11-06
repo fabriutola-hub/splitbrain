@@ -16,6 +16,7 @@ from splitbrain.core.pipeline import PairResult
 from splitbrain.evaluation import (
     LABELS,
     EvalPairV2,
+    alternative_replay_hint,
     build_live_run_record,
     compute_metrics,
     load_dataset,
@@ -27,6 +28,7 @@ from splitbrain.evaluation import (
     resolve_mode,
     run,
 )
+from splitbrain.llm.cassette import CassetteStore, ReplayMiss, extract_key
 from splitbrain.llm.client import LLMCallStats
 
 DATASET = Path(__file__).resolve().parents[1] / "eval" / "dataset.jsonl"
@@ -519,3 +521,197 @@ async def test_dataset_flag_writes_v2_live_report_with_language_mix(
     assert (eval_dir / "results-live.md").read_text(encoding="utf-8") == "do not touch either\n"
     assert not (eval_dir / "results-v2.md").exists()
     assert not (tmp_path / "cassettes").exists()
+
+
+def _v2_pair() -> EvalPairV2:
+    return EvalPairV2(
+        id="c01",
+        a=EvalSide(
+            room="sales",
+            author="maria",
+            text="We promised Enterprise SSO on December 1 for every customer.",
+        ),
+        b=EvalSide(
+            room="engineering",
+            author="owen",
+            text="Enterprise SSO is slipping to Q1 2027 for all customers.",
+        ),
+        label=Relation.CONTRADICTION,
+        note="stub v2 pair",
+        lang="en",
+        tags=["sso"],
+    )
+
+
+def _write_v2_dataset(eval_dir: Path) -> None:
+    eval_dir.mkdir(parents=True, exist_ok=True)
+    (eval_dir / "dataset-v2.jsonl").write_text(
+        _v2_pair().model_dump_json() + "\n", encoding="utf-8"
+    )
+
+
+def _write_extract_cassettes(cassettes_dir: Path, pair: EvalPairV2) -> None:
+    store = CassetteStore(cassettes_dir, model="unit/model", mode="record")
+    claims = {
+        "a": {
+            "kind": "commitment",
+            "subject": "SSO",
+            "subject_key": "sso",
+            "scope": "all customers",
+            "scope_key": "all",
+            "value": "December 1",
+            "polarity": "affirm",
+            "effective_date": "2026-12-01",
+        },
+        "b": {
+            "kind": "commitment",
+            "subject": "SSO",
+            "subject_key": "sso",
+            "scope": "all customers",
+            "scope_key": "all",
+            "value": "Q1 2027",
+            "polarity": "affirm",
+            "effective_date": "2027-01-01",
+        },
+    }
+    for side, message in (("a", pair.a), ("b", pair.b)):
+        store.write(
+            "extract",
+            extract_key(message.text),
+            {"text": message.text},
+            {"message_id": f"{pair.id}-{side}", "claims": [claims[side]]},
+        )
+
+
+async def test_alternative_dataset_replay_without_cassettes_explains_live_mode(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.setenv("SPLITBRAIN_ROOT", str(tmp_path))
+    monkeypatch.delenv("SPLITBRAIN_LLM_API_KEY", raising=False)
+    monkeypatch.delenv("SPLITBRAIN_LLM_MODE", raising=False)
+    eval_dir = tmp_path / "eval"
+    _write_v2_dataset(eval_dir)
+
+    with pytest.raises(SplitbrainError) as error:
+        await run("replay", dataset="eval/dataset-v2.jsonl")
+
+    message = str(error.value)
+    assert "eval/dataset-v2.jsonl has no recorded cassettes (replay mode)." in message
+    assert "SPLITBRAIN_LLM_API_KEY" in message
+    assert "--mode live" in message
+    assert "Replay miss" not in message
+    assert not (eval_dir / "results-v2.md").exists()
+    assert not (tmp_path / "cassettes").exists()
+    assert capsys.readouterr().out == ""
+
+
+async def test_alternative_dataset_replay_hint_mentions_the_live_report(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("SPLITBRAIN_ROOT", str(tmp_path))
+    monkeypatch.delenv("SPLITBRAIN_LLM_API_KEY", raising=False)
+    monkeypatch.delenv("SPLITBRAIN_LLM_MODE", raising=False)
+    eval_dir = tmp_path / "eval"
+    _write_v2_dataset(eval_dir)
+    runs = [{"run_utc": f"2026-11-0{index}T00:00:00+00:00"} for index in range(1, 4)]
+    (eval_dir / "results-v2-live.md").write_text(
+        f"<!-- splitbrain-live-runs {json.dumps(runs)} -->\n", encoding="utf-8"
+    )
+
+    with pytest.raises(SplitbrainError) as error:
+        await run("replay", dataset="eval/dataset-v2.jsonl")
+
+    message = str(error.value)
+    assert "Results of 3 live runs are in eval/results-v2-live.md." in message
+
+
+def test_alternative_replay_hint_uses_the_singular_for_one_run(tmp_path: Path) -> None:
+    (tmp_path / "results-v2-live.md").write_text(
+        '<!-- splitbrain-live-runs [{"run_utc": "2026-11-06T00:00:00+00:00"}] -->\n',
+        encoding="utf-8",
+    )
+    message = alternative_replay_hint("eval/dataset-v2.jsonl", "-v2", tmp_path)
+    assert "Results of 1 live run are in eval/results-v2-live.md." in message
+
+
+async def test_alternative_dataset_replay_without_a_classify_cassette_uses_the_hint(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.setenv("SPLITBRAIN_ROOT", str(tmp_path))
+    monkeypatch.delenv("SPLITBRAIN_LLM_API_KEY", raising=False)
+    monkeypatch.delenv("SPLITBRAIN_LLM_MODE", raising=False)
+    eval_dir = tmp_path / "eval"
+    _write_v2_dataset(eval_dir)
+    _write_extract_cassettes(tmp_path / "cassettes", _v2_pair())
+
+    with pytest.raises(SplitbrainError) as error:
+        await run("replay", dataset="eval/dataset-v2.jsonl")
+
+    assert "has no recorded cassettes" in str(error.value)
+    captured = capsys.readouterr()
+    assert "1 pairs from eval/dataset-v2.jsonl" in captured.out
+    assert "[DEGRADED] replay" in captured.out
+
+
+async def test_release_dataset_replay_keeps_the_plain_replay_miss(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("SPLITBRAIN_ROOT", str(tmp_path))
+    monkeypatch.delenv("SPLITBRAIN_LLM_MODE", raising=False)
+    eval_dir = tmp_path / "eval"
+    eval_dir.mkdir()
+    (eval_dir / "dataset.jsonl").write_text(_stub_pair().model_dump_json() + "\n", encoding="utf-8")
+
+    for dataset in (None, "eval/dataset.jsonl"):
+        with pytest.raises(ReplayMiss) as error:
+            await run("replay", dataset=dataset)
+        message = str(error.value)
+        assert "Replay miss for 'extract'" in message
+        assert "has no recorded cassettes" not in message
+
+    assert not (eval_dir / "results.md").exists()
+
+
+@pytest.mark.parametrize(
+    ("mode", "report_name"),
+    [("live", "results-v2-live.md"), ("record", "results-v2.md")],
+)
+async def test_alternative_dataset_never_shows_the_replay_hint_outside_replay(
+    mode: str,
+    report_name: str,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    monkeypatch.setenv("SPLITBRAIN_ROOT", str(tmp_path))
+    monkeypatch.setenv("SPLITBRAIN_LLM_API_KEY", "secret-live-key")
+    monkeypatch.delenv("SPLITBRAIN_LLM_MODE", raising=False)
+    eval_dir = tmp_path / "eval"
+    _write_v2_dataset(eval_dir)
+
+    await run(
+        mode,
+        dataset="eval/dataset-v2.jsonl",
+        transport=_FakeEvalTransport(report_usage=True),
+    )
+
+    captured = capsys.readouterr()
+    assert "has no recorded cassettes" not in captured.out
+    assert "has no recorded cassettes" not in captured.err
+    assert (eval_dir / report_name).is_file()
+
+
+def test_cli_alternative_dataset_replay_exits_with_the_hint_and_no_traceback(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.setenv("SPLITBRAIN_ROOT", str(tmp_path))
+    monkeypatch.delenv("SPLITBRAIN_LLM_API_KEY", raising=False)
+    monkeypatch.delenv("SPLITBRAIN_LLM_MODE", raising=False)
+    _write_v2_dataset(tmp_path / "eval")
+
+    assert cli.main(["eval", "--dataset", "eval/dataset-v2.jsonl"]) == 1
+
+    captured = capsys.readouterr()
+    assert "eval/dataset-v2.jsonl has no recorded cassettes (replay mode)." in captured.err
+    assert "Traceback" not in captured.err
+    assert "Replay miss" not in captured.err

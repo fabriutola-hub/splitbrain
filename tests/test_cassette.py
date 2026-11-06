@@ -59,8 +59,10 @@ def test_replay_miss_names_the_input_and_explains_the_fix(tmp_path: Path) -> Non
     message = str(error.value)
     assert "cassettes/classify/deadbeef.json" in message
     assert "pair sso/acme in #sales" in message
-    assert "SPLITBRAIN_LLM_MODE=record uv run splitbrain eval" in message
+    assert "SPLITBRAIN_LLM_MODE=record" in message
     assert "SPLITBRAIN_LLM_API_KEY" in message
+    assert "uv run splitbrain record --missing" in message
+    assert "SPLITBRAIN_LLM_MODE=record uv run splitbrain eval" not in message
 
 
 async def test_replay_never_opens_a_transport(tmp_path: Path, monkeypatch) -> None:
