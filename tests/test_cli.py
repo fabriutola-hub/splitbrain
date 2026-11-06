@@ -163,6 +163,48 @@ def test_seed_dispatch(monkeypatch: pytest.MonkeyPatch) -> None:
     assert calls == [("settings-object", "sso", False)]
 
 
+def _scenario_root(tmp_path: Path, name: str) -> Path:
+    source = Path(__file__).resolve().parents[1] / "seed" / "scenarios" / f"{name}.yaml"
+    target = tmp_path / "seed" / "scenarios" / f"{name}.yaml"
+    target.parent.mkdir(parents=True)
+    target.write_text(source.read_text(encoding="utf-8"), encoding="utf-8")
+    return tmp_path
+
+
+def test_seed_names_an_unknown_scenario_before_switch_settings(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.setenv("SPLITBRAIN_ROOT", str(_scenario_root(tmp_path, "sso")))
+    assert cli.main(["seed", "does-not-exist"]) == 1
+    error = capsys.readouterr().err
+    assert "Unknown scenario 'does-not-exist'" in error
+    assert "Available: sso" in error
+    assert "deploy/.env" not in error
+
+
+def test_seed_rejects_auto_decide_without_a_decision_block(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.setenv("SPLITBRAIN_ROOT", str(_scenario_root(tmp_path, "near-misses")))
+    assert cli.main(["seed", "near-misses", "--auto-decide"]) == 1
+    error = capsys.readouterr().err
+    assert "no 'decision:' block" in error
+    assert "deploy/.env" not in error
+
+
+@pytest.mark.parametrize("agent", ["arbiter", "arbiter-b", "verifier", "all"])
+def test_tui_is_sentinel_only(
+    agent: str, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.setattr(
+        cli.Settings,
+        "load",
+        classmethod(lambda cls, **kwargs: (_ for _ in ()).throw(AssertionError("no Switch here"))),
+    )
+    assert cli.main(["run", agent, "--tui"]) == 1
+    assert "--tui is only available for the Sentinel" in capsys.readouterr().err
+
+
 def test_eval_dispatch_does_not_load_switch_settings(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
