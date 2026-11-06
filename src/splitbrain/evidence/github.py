@@ -55,6 +55,21 @@ _ENGLISH_MONTH_RE = re.compile(
     re.IGNORECASE,
 )
 _QUARTER_RE = re.compile(r"\b(Q[1-4])(?:\s+(\d{4}))?\b", re.IGNORECASE)
+_YEAR_RE = re.compile(r"\b(20\d{2})\b")
+_NEGATION_CUE_RE = re.compile(
+    r"\b(?:not|never|no\s+longer|without|out\s+of|removed\s+from|pulled\s+from|"
+    r"dropped\s+from|moved\s+out\s+of|delayed\s+(?:beyond|past)|beyond|past|post-?)\b",
+    re.IGNORECASE,
+)
+_CLAUSE_BOUNDARY_RE = re.compile(r"[.;:,!?]|\bbut\b", re.IGNORECASE)
+_BETA_CONDITION_RE = re.compile(
+    r"\b(?:beta|preview|pilot|early\s+access|experimental)\b", re.IGNORECASE
+)
+_GA_CONDITION_RE = re.compile(
+    r"\b(?:ga|general\s+availability|generally\s+available|live\s+for\s+all|"
+    r"available\s+to\s+all|for\s+everyone)\b",
+    re.IGNORECASE,
+)
 _UNITS = (
     r"USD|EUR|GBP|percent|hours?|hrs?|days?|weeks?|months?|years?|"
     r"minutes?|mins?|seconds?|secs?|ms|gb|mb|kb|tb|"
@@ -72,6 +87,10 @@ _AMOUNT_UNIT_RE = re.compile(
 
 class SplitbrainEvidenceError(SplitbrainError):
     """Live evidence failed; no silent fallback to the fixture was used."""
+
+
+class TransientEvidenceError(SplitbrainEvidenceError):
+    """A GitHub failure worth retrying: timeout, connection error, 429 or 5xx."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -287,6 +306,271 @@ def issue_is_relevant(issue: GitHubIssue, values: Sequence[str]) -> bool:
     return any(needle in haystack for needle in needles for haystack in haystacks)
 
 
+def _periods(text: str) -> set[str]:
+    """Quarter/month/date keys a milestone or a claim value can be compared on."""
+    periods: set[str] = set()
+    for match in _QUARTER_RE.finditer(text):
+        quarter = match.group(1).casefold()
+        year = match.group(2)
+        periods.add(quarter)
+        if year:
+            periods.add(f"{quarter} {year}")
+    for match in _ISO_DATE_RE.finditer(text):
+        year, month, day = int(match.group(1)), int(match.group(2)), int(match.group(3))
+        try:
+            date(year, month, day)
+        except ValueError:
+            continue
+        month_name = _MONTH_NAMES[month].casefold()
+        quarter = f"q{(month - 1) // 3 + 1}"
+        periods.update(
+            {
+                f"{year:04d}-{month:02d}-{day:02d}",
+                f"{month_name} {day}",
+                month_name,
+                quarter,
+                f"{quarter} {year}",
+            }
+        )
+    for match in _ENGLISH_MONTH_RE.finditer(text):
+        month_name = match.group(1).capitalize()
+        month_number = _MONTH_NAMES.index(month_name)
+        quarter = f"q{(month_number - 1) // 3 + 1}"
+        periods.add(month_name.casefold())
+        periods.add(quarter)
+        day_raw = match.group(2)
+        day = int(day_raw) if day_raw is not None else None
+        if day is not None and 1 <= day <= 31:
+            periods.add(f"{month_name.casefold()} {day}")
+        year_match = _YEAR_RE.search(text[match.end() : match.end() + 12])
+        if year_match:
+            year = year_match.group(1)
+            periods.add(f"{quarter} {year}")
+            periods.add(f"{month_name.casefold()} {year}")
+            if day is not None and 1 <= day <= 31:
+                periods.add(f"{month_name.casefold()} {day} {year}")
+    return periods
+
+
+def _years(text: str) -> set[int]:
+    return {int(match.group(1)) for match in _YEAR_RE.finditer(text)}
+
+
+def _value_matches_milestone(value: str, milestone: str) -> bool:
+    """True when a claim value and a milestone name the same quarter, month or date."""
+    if not value or not milestone:
+        return False
+    if not (_periods(value) & _periods(milestone)):
+        return False
+    value_years = _years(value)
+    milestone_years = _years(milestone)
+    return not (value_years and milestone_years and value_years.isdisjoint(milestone_years))
+
+
+def _matches_any(milestone: str, values: Sequence[str]) -> bool:
+    return any(_value_matches_milestone(value, milestone) for value in values)
+
+
+def _clause_prefix(text: str, index: int) -> str:
+    prefix = text[:index]
+    boundaries = list(_CLAUSE_BOUNDARY_RE.finditer(prefix))
+    return prefix[boundaries[-1].end() :] if boundaries else prefix
+
+
+def _value_is_negated(text: str, value: str) -> bool:
+    """True when every mention of a period value sits behind a negation cue."""
+    if not _periods(value):
+        return False
+    haystack = _normalize_spaces(text).casefold()
+    needle = _normalize_spaces(value).casefold()
+    if not needle:
+        return False
+    start = 0
+    mentioned = False
+    while (index := haystack.find(needle, start)) != -1:
+        mentioned = True
+        if not _NEGATION_CUE_RE.search(_clause_prefix(haystack, index)):
+            return False
+        start = index + len(needle)
+    return mentioned
+
+
+def _specific_values(values: Sequence[str]) -> list[str]:
+    """Drop an unqualified quarter when the same claim also names its year."""
+    qualified_quarters = {
+        match.group(1).casefold()
+        for value in values
+        if (match := _QUARTER_RE.fullmatch(value)) and match.group(2)
+    }
+    return [
+        value
+        for value in values
+        if not (
+            (match := _QUARTER_RE.fullmatch(value))
+            and not match.group(2)
+            and match.group(1).casefold() in qualified_quarters
+        )
+    ]
+
+
+def affirmed_claim_values(claim: EvidenceClaim | str | None) -> list[str]:
+    """Claim values the claim affirms, dropping a period it explicitly negates."""
+    if claim is None:
+        return []
+    values = _specific_values(extract_claim_values(claim))
+    if isinstance(claim, str):
+        text = claim
+    else:
+        text = f"{claim.value} {claim.date or ''}".strip()
+    return [value for value in values if not _value_is_negated(text, value)]
+
+
+def milestone_direction(
+    before: str,
+    after: str,
+    values_a: Sequence[str],
+    values_b: Sequence[str],
+) -> EvidenceStatus:
+    """Decide which claim a real milestone move refutes.
+
+    A move away from a value only A asserts, or toward a value only B asserts,
+    supports B (A is refuted); the reverse supports A. A move that cannot be
+    attributed to one claim is ambiguous.
+    """
+    before_a = _matches_any(before, values_a)
+    before_b = _matches_any(before, values_b)
+    after_a = _matches_any(after, values_a)
+    after_b = _matches_any(after, values_b)
+    left_a = before_a and not before_b and not after_a
+    arrived_b = after_b and not after_a and not before_b
+    left_b = before_b and not before_a and not after_b
+    arrived_a = after_a and not after_b and not before_a
+    if left_a or arrived_b:
+        return "supports_b"
+    if left_b or arrived_a:
+        return "supports_a"
+    return "conflicting"
+
+
+def _claim_condition(claim: EvidenceClaim | str | None) -> str | None:
+    if claim is None:
+        return None
+    text = claim if isinstance(claim, str) else claim.value
+    beta = bool(_BETA_CONDITION_RE.search(text))
+    ga = bool(_GA_CONDITION_RE.search(text))
+    if beta == ga:
+        return None
+    return "beta" if beta else "ga"
+
+
+def _issue_conditions(issue: GitHubIssue) -> set[str]:
+    text = " ".join(
+        [
+            issue.title,
+            issue.body,
+            issue.milestone,
+            *(event.milestone for event in issue.timeline if event.milestone),
+        ]
+    )
+    conditions: set[str] = set()
+    if _BETA_CONDITION_RE.search(text):
+        conditions.add("beta")
+    if _GA_CONDITION_RE.search(text):
+        conditions.add("ga")
+    return conditions
+
+
+def _condition_gate(
+    direction: EvidenceStatus,
+    issue: GitHubIssue,
+    claim_a: EvidenceClaim | str | None,
+    claim_b: EvidenceClaim | str | None,
+) -> tuple[EvidenceStatus, str]:
+    """A beta claim and a GA claim cannot support each other without naming the phase."""
+    if direction not in ("supports_a", "supports_b"):
+        return direction, ""
+    condition_a = _claim_condition(claim_a)
+    condition_b = _claim_condition(claim_b)
+    if condition_a is None or condition_b is None or condition_a == condition_b:
+        return direction, ""
+    mentioned = _issue_conditions(issue)
+    required = condition_b if direction == "supports_b" else condition_a
+    other = condition_a if direction == "supports_b" else condition_b
+    if required in mentioned:
+        return direction, ""
+    claim_label = "B" if direction == "supports_b" else "A"
+    display = "GA" if required == "ga" else "beta"
+    other_display = "GA" if other == "ga" else "beta"
+    if other in mentioned:
+        return "conflicting", (
+            f"It mentions {other_display} but not {display}, so it cannot support "
+            f"{claim_label}'s {display} claim"
+        )
+    condition_a_display = "GA" if condition_a == "ga" else "beta"
+    condition_b_display = "GA" if condition_b == "ga" else "beta"
+    return "inconclusive", (
+        f"It mentions neither {condition_a_display} nor {condition_b_display}, so it "
+        f"cannot support {claim_label}'s {display} claim"
+    )
+
+
+def _best_value(values: Sequence[str]) -> str:
+    def rank(value: str) -> tuple[int, int]:
+        if _ENGLISH_MONTH_RE.fullmatch(value) and re.search(r"\d", value):
+            return (0, len(value))
+        if _ISO_DATE_RE.fullmatch(value):
+            return (1, len(value))
+        if _QUARTER_RE.fullmatch(value) and _YEAR_RE.search(value):
+            return (2, len(value))
+        if _ENGLISH_MONTH_RE.fullmatch(value):
+            return (3, len(value))
+        return (4, len(value))
+
+    return min(values, key=rank) if values else ""
+
+
+def _matching_values(milestone: str, values: Sequence[str]) -> list[str]:
+    return [value for value in values if _value_matches_milestone(value, milestone)]
+
+
+def _direction_reason(
+    before: str,
+    after: str,
+    values_a: Sequence[str],
+    values_b: Sequence[str],
+    direction: EvidenceStatus,
+) -> str:
+    before_a = _matching_values(before, values_a)
+    before_b = _matching_values(before, values_b)
+    after_a = _matching_values(after, values_a)
+    after_b = _matching_values(after, values_b)
+    if direction == "supports_b":
+        parts: list[str] = []
+        if before_a and not before_b:
+            parts.append(f"away from the {before} milestone in A ({_best_value(before_a)})")
+        if after_b and not after_a:
+            parts.append(f"toward the {after} milestone in B ({_best_value(after_b)})")
+        return " and ".join(parts) or "away from A's milestone"
+    if direction == "supports_a":
+        parts = []
+        if before_b and not before_a:
+            parts.append(f"away from the {before} milestone in B ({_best_value(before_b)})")
+        if after_a and not after_b:
+            parts.append(f"toward the {after} milestone in A ({_best_value(after_a)})")
+        return " and ".join(parts) or "away from B's milestone"
+    if before_a and before_b:
+        return f"both A and B mention the {before} milestone"
+    if after_a and after_b:
+        return f"both A and B mention the {after} milestone"
+    if before_a and after_a:
+        return f"A mentions both {before} and {after}"
+    if before_b and after_b:
+        return f"B mentions both {before} and {after}"
+    if not before_a and not before_b and not after_a and not after_b:
+        return f"neither A nor B mentions {before} or {after}"
+    return "the move does not clearly refute either claim"
+
+
 def _format_disputed_values(values: Sequence[str]) -> str:
     cleaned = [value for value in values if value]
     if not cleaned:
@@ -331,6 +615,13 @@ class GitHubEvidence:
         url = f"{API_ROOT}{path}"
         try:
             response = await self._client.get(url, params=params, headers=self._headers())
+        except httpx.TransportError as exc:
+            raise TransientEvidenceError(
+                f"Live GitHub evidence failed for {self.repo_url} at {path} "
+                f"({type(exc).__name__}: {exc}). The evidence request was NOT answered "
+                "with a silent fixture fallback; this transient error is retried. Set "
+                "SPLITBRAIN_EVIDENCE_MODE=fixture explicitly to use the recorded data."
+            ) from exc
         except httpx.HTTPError as exc:
             raise SplitbrainEvidenceError(
                 f"Live GitHub evidence failed for {self.repo_url} at {path} "
@@ -338,6 +629,13 @@ class GitHubEvidence:
                 "with a silent fixture fallback. Fix the network/GitHub access, or set "
                 "SPLITBRAIN_EVIDENCE_MODE=fixture explicitly to use the recorded data."
             ) from exc
+        if response.status_code == 429 or response.status_code >= 500:
+            raise TransientEvidenceError(
+                f"Live GitHub evidence failed for {self.repo_url}: GET {path} returned "
+                f"HTTP {response.status_code}: {response.text[:300]}. This transient error "
+                "is retried; no fixture fallback was used. Set "
+                "SPLITBRAIN_EVIDENCE_MODE=fixture explicitly to use recorded data."
+            )
         if response.status_code != 200:
             raise SplitbrainEvidenceError(
                 f"Live GitHub evidence failed for {self.repo_url}: GET {path} returned "
@@ -510,34 +808,60 @@ def build_evidence(
     slug = repo_slug(snapshot.repo)
     tail = f"{len(open_issues)} open issue(s) matched; closed duplicates ignored."
     values = extract_claim_values(claim_a, claim_b)
+    values_a = affirmed_claim_values(claim_a)
+    values_b = affirmed_claim_values(claim_b)
     relevant_issues = [issue for issue in open_issues if issue_is_relevant(issue, values)]
     moves = [(issue, move) for issue in relevant_issues if (move := milestone_move(issue))]
     status: EvidenceStatus
     if moves:
         issue, (before, after, day) = moves[0]
-        # The brief shows only this one sentence; the timeline is for the record.
-        summary = f'issue #{issue.number} "{issue.title}" moved from {before} to {after} on {day}.'
-        detail = f"GitHub, {slug}: {summary} Timeline: {timeline_text(issue)}. {tail}"
-        status = "supports_b"
+        direction = milestone_direction(before, after, values_a, values_b)
+        direction, condition_note = _condition_gate(direction, issue, claim_a, claim_b)
+        move_sentence = (
+            f'issue #{issue.number} "{issue.title}" moved from {before} to {after} on {day}.'
+        )
+        reason = condition_note or _direction_reason(before, after, values_a, values_b, direction)
+        reason = reason[:1].upper() + reason[1:]
+        if direction == "supports_b":
+            summary = f"Supports B: {move_sentence}"
+            detail = f"GitHub, {slug}: {summary} {reason}. Timeline: {timeline_text(issue)}. {tail}"
+        elif direction == "supports_a":
+            summary = f"Supports A: {move_sentence}"
+            detail = f"GitHub, {slug}: {summary} {reason}. Timeline: {timeline_text(issue)}. {tail}"
+        elif direction == "conflicting":
+            summary = f"Ambiguous: {move_sentence}"
+            detail = f"GitHub, {slug}: {summary} {reason}. Timeline: {timeline_text(issue)}. {tail}"
+        else:
+            summary = f"Insufficient evidence: {move_sentence}"
+            detail = f"GitHub, {slug}: {summary} {reason}. Timeline: {timeline_text(issue)}. {tail}"
+        status = direction
     elif relevant_issues:
         issue = relevant_issues[0]
         milestone = f", milestone {issue.milestone}" if issue.milestone else ""
-        summary = f'issue #{issue.number} "{issue.title}" is open{milestone}.'
+        summary = f'Ambiguous: issue #{issue.number} "{issue.title}" is open{milestone}.'
+        matched = [value for value in values if issue_is_relevant(issue, [value])]
+        matched_text = _format_disputed_values(matched)
         detail = (
             f"GitHub, {slug}: {summary} "
-            f'It is the closest open issue for "{subject}"; no milestone move was recorded. '
-            f"{tail}"
+            f"It mentions {matched_text} from the two claims but records no milestone move, "
+            f"so it does not settle which claim is right. {tail}"
         )
         status = "conflicting"
     elif open_issues:
         disputed = _format_disputed_values(values)
         summary = (
-            f'{len(open_issues)} open issue(s) mention "{subject}", but none mentions {disputed}.'
+            f'Insufficient evidence: {len(open_issues)} open issue(s) mention "{subject}", '
+            f"but none mentions {disputed}."
         )
-        detail = f"GitHub, {slug}: {summary} {tail}"
+        closest = open_issues[0]
+        milestone = f", milestone {closest.milestone}" if closest.milestone else ""
+        detail = (
+            f"GitHub, {slug}: {summary} "
+            f'Closest open issue: #{closest.number} "{closest.title}"{milestone}. {tail}'
+        )
         status = "inconclusive"
     else:
-        summary = f'no open issue mentions "{subject}".'
+        summary = f'Insufficient evidence: no open issue mentions "{subject}".'
         detail = f"GitHub, {slug}: {summary} {tail}"
         status = "none"
     return Evidence(

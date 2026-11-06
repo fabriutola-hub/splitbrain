@@ -18,13 +18,17 @@ from splitbrain.evidence.github import (
     GitHubEvidence,
     GitHubIssue,
     GitHubSnapshot,
+    MilestoneEvent,
     SplitbrainEvidenceError,
+    TransientEvidenceError,
+    affirmed_claim_values,
     build_evidence,
     extract_amounts,
     extract_claim_values,
     extract_date_values,
     extract_quarters,
     issue_is_relevant,
+    milestone_direction,
     milestone_move,
     repo_slug,
 )
@@ -98,6 +102,128 @@ def test_extract_quarters_and_iso_dates() -> None:
     ]
 
 
+def test_milestone_direction_attributes_the_move_to_one_claim() -> None:
+    values_a = extract_claim_values(EvidenceClaim(room="sales", value="live in Q4 2026"))
+    values_b = extract_claim_values(EvidenceClaim(room="engineering", value="GA in Q1 2027"))
+
+    # Left A's quarter without arriving at B's: A is refuted.
+    assert milestone_direction("Q4 2026", "Q2 2027", values_a, values_b) == "supports_b"
+    # Arrived at B's quarter without leaving A's: A is refuted.
+    assert milestone_direction("Q3 2026", "Q1 2027", values_a, values_b) == "supports_b"
+    # Arrived at A's quarter: B is refuted.
+    assert milestone_direction("Q2 2027", "Q4 2026", values_a, values_b) == "supports_a"
+    # Left B's quarter: B is refuted.
+    assert milestone_direction("Q1 2027", "Q2 2027", values_a, values_b) == "supports_a"
+    # A move between quarters neither claim mentions cannot be attributed.
+    assert milestone_direction("Q3 2026", "Q2 2027", values_a, values_b) == "conflicting"
+
+
+def test_december_first_is_q4_and_out_of_q4_refutes_a() -> None:
+    claim_a = EvidenceClaim(room="sales", value="live on December 1", date="2026-12-01")
+    claim_b = EvidenceClaim(room="engineering", value="out of Q4", date=None)
+
+    assert "Q4" in extract_claim_values(claim_b)
+    assert affirmed_claim_values(claim_b) == []
+    assert "December 1" in affirmed_claim_values(claim_a)
+    assert (
+        milestone_direction(
+            "Q4 2026",
+            "Q1 2027",
+            affirmed_claim_values(claim_a),
+            affirmed_claim_values(claim_b),
+        )
+        == "supports_b"
+    )
+
+
+def test_milestone_direction_keeps_years_apart() -> None:
+    values_a = affirmed_claim_values("Q4 2026")
+    values_b = affirmed_claim_values("Q4 2027")
+    assert values_a == ["Q4 2026"]
+    assert values_b == ["Q4 2027"]
+    assert milestone_direction("Q4 2026", "Q1 2027", values_a, values_b) == "supports_b"
+    assert milestone_direction("Q4 2027", "Q1 2027", values_a, values_b) == "supports_a"
+
+
+def _issue_with_move(
+    *,
+    number: int = 12,
+    title: str = "SSO for enterprise",
+    body: str = "Moved from Q4 2026 to Q1 2027.",
+    before: str = "Q4 2026",
+    after: str = "Q1 2027",
+) -> GitHubIssue:
+    return GitHubIssue(
+        number=number,
+        title=title,
+        body=body,
+        state="open",
+        milestone=after,
+        timeline=[
+            MilestoneEvent(event="milestoned", milestone=before, created_at="2026-11-03T00:00:00Z"),
+            MilestoneEvent(
+                event="demilestoned", milestone=before, created_at="2026-11-03T00:00:00Z"
+            ),
+            MilestoneEvent(event="milestoned", milestone=after, created_at="2026-11-03T00:00:00Z"),
+        ],
+    )
+
+
+def test_beta_and_ga_evidence_do_not_support_each_other() -> None:
+    claim_a = EvidenceClaim(room="sales", value="SSO beta on December 1", date="2026-12-01")
+    claim_b = EvidenceClaim(room="engineering", value="SSO GA in Q1", date=None)
+
+    beta_only = build_evidence(
+        "sb-0010",
+        "SSO",
+        GitHubSnapshot(repo=REPO, issues=[_issue_with_move(title="SSO beta")]),
+        source="fixture",
+        claim_a=claim_a,
+        claim_b=claim_b,
+    )
+    assert beta_only.status == "conflicting"
+    assert beta_only.summary.startswith("Ambiguous: ")
+    assert "It mentions beta but not GA" in beta_only.detail
+
+    ga_only = build_evidence(
+        "sb-0011",
+        "SSO",
+        GitHubSnapshot(repo=REPO, issues=[_issue_with_move(title="SSO GA")]),
+        source="fixture",
+        claim_a=claim_a,
+        claim_b=claim_b,
+    )
+    assert ga_only.status == "supports_b"
+    assert ga_only.summary.startswith("Supports B: ")
+
+    neither = build_evidence(
+        "sb-0012",
+        "SSO",
+        GitHubSnapshot(repo=REPO, issues=[_issue_with_move(title="SSO rollout")]),
+        source="fixture",
+        claim_a=claim_a,
+        claim_b=claim_b,
+    )
+    assert neither.status == "inconclusive"
+    assert neither.summary.startswith("Insufficient evidence: ")
+    assert "It mentions neither beta nor GA" in neither.detail
+
+
+def test_ga_evidence_cannot_support_a_beta_claim_either() -> None:
+    claim_a = EvidenceClaim(room="sales", value="SSO GA on December 1", date="2026-12-01")
+    claim_b = EvidenceClaim(room="engineering", value="SSO beta in Q1", date=None)
+    evidence = build_evidence(
+        "sb-0013",
+        "SSO",
+        GitHubSnapshot(repo=REPO, issues=[_issue_with_move(title="SSO GA")]),
+        source="fixture",
+        claim_a=claim_a,
+        claim_b=claim_b,
+    )
+    assert evidence.status == "conflicting"
+    assert "It mentions GA but not beta" in evidence.detail
+
+
 def test_build_evidence_sso_refunds_and_inconclusive_cases() -> None:
     fixture = GitHubSnapshot.model_validate(
         json.loads((ROOT / "seed" / "github_fixture.json").read_text(encoding="utf-8"))
@@ -122,7 +248,9 @@ def test_build_evidence_sso_refunds_and_inconclusive_cases() -> None:
         claim_b=SSO_CLAIM_B,
     )
     assert sso_evidence.status == "supports_b"
+    assert sso_evidence.summary.startswith("Supports B: ")
     assert "moved from Q4 2026 to Q1 2027 on Nov 4" in sso_evidence.summary
+    assert "Away from the Q4 2026 milestone in A (December 1)" in sso_evidence.detail
     assert verdict_for(0.95, sso_evidence.status) == "confirmed"
 
     # 2. Refunds: issue #5 mentions $500 and $250 -> conflicting -> confirmed.
@@ -144,7 +272,9 @@ def test_build_evidence_sso_refunds_and_inconclusive_cases() -> None:
         claim_b=REFUND_CLAIM_B,
     )
     assert refunds_evidence.status == "conflicting"
+    assert refunds_evidence.summary.startswith("Ambiguous: ")
     assert 'issue #5 "Support macros: refunds over $250' in refunds_evidence.summary
+    assert "It mentions $500 or $250 from the two claims" in refunds_evidence.detail
     assert verdict_for(0.92, refunds_evidence.status) == "confirmed"
 
     # 3. Open issues match the topic, but none mentions any disputed value -> inconclusive.
@@ -175,7 +305,8 @@ def test_build_evidence_sso_refunds_and_inconclusive_cases() -> None:
     )
     assert inconclusive.status == "inconclusive"
     assert inconclusive.summary == (
-        '2 open issue(s) mention "SSO", but none mentions $250, $500, Q4, December 1 or December.'
+        'Insufficient evidence: 2 open issue(s) mention "SSO", but none mentions '
+        "$250, $500, Q4, December 1 or December."
     )
     assert verdict_for(0.95, inconclusive.status) == "discarded"
 
@@ -230,7 +361,9 @@ async def test_fixture_filters_by_subject_and_finds_the_milestone_move() -> None
     )
     assert evidence.source == "fixture"
     assert evidence.status == "supports_b"
+    assert evidence.summary.startswith("Supports B: ")
     assert "moved from Q4 2026 to Q1 2027 on Nov 4" in evidence.summary
+    assert "Away from the Q4 2026 milestone in A (December 1)" in evidence.detail
     assert any("#2" in item.title for item in evidence.items)
 
 
@@ -243,6 +376,7 @@ async def test_fixture_with_no_match_is_none_evidence() -> None:
     evidence = build_evidence("sb-0002", "nonexistent widget", snapshot, source="fixture")
     assert evidence.items == []
     assert evidence.status == "none"
+    assert evidence.summary.startswith("Insufficient evidence: ")
 
 
 async def test_missing_fixture_fails_loudly(tmp_path: Path) -> None:
@@ -257,13 +391,13 @@ async def test_missing_fixture_fails_loudly(tmp_path: Path) -> None:
 
 
 @respx.mock
-async def test_live_network_error_fails_with_a_clear_message_and_no_fallback() -> None:
+async def test_live_network_error_is_transient_with_a_clear_message_and_no_fallback() -> None:
     respx.get("https://api.github.com/search/issues").mock(
         side_effect=httpx.ConnectError("no route to host")
     )
     provider = GitHubEvidence(settings("live"), REPO)
     try:
-        with pytest.raises(SplitbrainEvidenceError) as error:
+        with pytest.raises(TransientEvidenceError) as error:
             await provider.snapshot("SSO")
     finally:
         await provider.aclose()
@@ -275,16 +409,45 @@ async def test_live_network_error_fails_with_a_clear_message_and_no_fallback() -
 
 
 @respx.mock
-async def test_live_non_200_fails_loudly() -> None:
+@pytest.mark.parametrize("status", [429, 500, 502, 503, 504])
+async def test_live_rate_limit_and_5xx_are_transient(status: int) -> None:
     respx.get("https://api.github.com/search/issues").mock(
-        return_value=httpx.Response(403, json={"message": "rate limited"})
+        return_value=httpx.Response(status, json={"message": "try again"})
     )
     provider = GitHubEvidence(settings("live"), REPO)
     try:
-        with pytest.raises(SplitbrainEvidenceError, match="HTTP 403"):
+        with pytest.raises(TransientEvidenceError, match=f"HTTP {status}"):
             await provider.snapshot("SSO")
     finally:
         await provider.aclose()
+
+
+@respx.mock
+async def test_live_non_200_fails_loudly() -> None:
+    respx.get("https://api.github.com/search/issues").mock(
+        return_value=httpx.Response(403, json={"message": "forbidden"})
+    )
+    provider = GitHubEvidence(settings("live"), REPO)
+    try:
+        with pytest.raises(SplitbrainEvidenceError, match="HTTP 403") as error:
+            await provider.snapshot("SSO")
+    finally:
+        await provider.aclose()
+    assert not isinstance(error.value, TransientEvidenceError)
+
+
+@respx.mock
+async def test_live_404_is_not_transient() -> None:
+    respx.get("https://api.github.com/search/issues").mock(
+        return_value=httpx.Response(404, json={"message": "Not Found"})
+    )
+    provider = GitHubEvidence(settings("live"), REPO)
+    try:
+        with pytest.raises(SplitbrainEvidenceError, match="HTTP 404") as error:
+            await provider.snapshot("SSO")
+    finally:
+        await provider.aclose()
+    assert not isinstance(error.value, TransientEvidenceError)
 
 
 @respx.mock
