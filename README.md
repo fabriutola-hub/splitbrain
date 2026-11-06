@@ -12,10 +12,11 @@ A two-minute path through the project:
 | --- | --- |
 | **Watch** | [Demo video, 2:30](https://youtu.be/oSs8K3sGL0U): a real run on Mattermost + Switch 0.31, with English and Spanish captions. |
 | **Run** | `git clone https://github.com/fabriutola-hub/splitbrain.git && cd splitbrain && uv sync && uv run splitbrain demo --auto-decide`. Needs Docker and `uv`; no API key and no accounts (the model answers are replayed from `cassettes/`). The first run downloads the Switch and Mattermost images; then the whole story plays on its own and ends with a `DEMO SUMMARY` and exit code 0. Add `--followup` to also see the decision memory. |
+| **Recovery** | `uv run splitbrain demo --auto-decide --recovery` demonstrates Arbiter takeover with an open proposal, a Sentinel crash between corrections, and an ignored duplicate confirmation. The [recovery demo](#recovery-demo) checks Switch documents and original threads before printing its results. |
 | **See it in chat** | Open http://localhost:8065 and log in as `maria` or `tomas` with the password printed in the `DEMO SUMMARY`, which also links to the private conflict room. |
 | **How Switch is used** | [Every Switch feature and the file that uses it](#how-splitbrain-uses-switch): the event stream, agent-created private rooms, an exclusive role with a standby, room documents as the decision record, `link_rooms`, a GitHub reference and one YAML template. Without Switch there is no transport and no shared state. |
 | **What we found in Switch** | [A reproducible race in the exclusive role lease](#what-we-found-in-switch-0310), plus four protocol details that cost us time. |
-| **Does it work** | 459 unit tests, 4 integration tests against a live stack, and a [44-pair evaluation](#evaluation) (replay: precision 1.000, recall 0.889, F1 0.941; 3-run live mean: precision 1.000, recall 0.833, F1 0.909) with its errors listed. |
+| **Does it work** | 491 unit tests, 5 integration tests for a live stack, and a [44-pair evaluation](#evaluation) (replay: precision 1.000, recall 0.889, F1 0.941; 3-run live mean: precision 1.000, recall 0.833, F1 0.909) with its errors listed. |
 | **Honest limits** | [Known limits](#known-limits): tested on Windows 11 and on Mattermost only. |
 
 Sales promises Acme that SSO will be live on December 1, in a public channel. Engineering pulls SSO out of Q4, in a private channel. Nobody is a member of both rooms, so nobody sees both statements. The Sentinel is: it listens to every room over a `scope=all&filter=all` event stream, records both claims, and the other two agents convene the only people who can resolve the difference.
@@ -45,6 +46,30 @@ No API key is needed: with no `SPLITBRAIN_LLM_API_KEY`, the demo replays committ
 After the demo, open Mattermost at **http://localhost:8065** and log in as `maria` or `tomas` with the shared password printed in the `DEMO SUMMARY` (the same logins are printed by `uv run splitbrain bootstrap`). That summary also prints direct links to `sales`, `engineering` and the conflict room. The Gateway UI is at http://localhost:3000. `uv run splitbrain --help` lists every command.
 
 Conflict rooms are **private**: only the two claim authors (plus the Arbiter, its standby and the Sentinel) are members, so a quote from a private team channel never leaks into a public one. Times in briefs and in the decision record use the machine's local zone with its offset (`Nov 4 23:18 UTC-04:00`); `SPLITBRAIN_TZ` overrides it with any IANA zone.
+
+### Recovery demo
+
+```bash
+uv run splitbrain demo --auto-decide --recovery
+```
+
+Requires `--auto-decide` and the `sso` scenario (the default). Add `--offline` to use replay cassettes and fixture evidence without model or GitHub calls; the original SSO messages and confirmation are unchanged. `--followup` can also run after recovery.
+
+The demo stops the primary Arbiter after its persisted proposal v1, waits for arbiter-b to hold the exclusive lease and adopt the room, and only then sends Tomás's confirmation. The canonical record stays in the same case; arbiter-b writes its own takeover snapshot because [Switch only lets a document's creator edit it](#known-limits). It checks one room, one proposal v1, no v2, one final decision, and exactly one correction in each original thread, then repeats the same confirmation and checks the counts and message IDs again.
+
+For this run only, the first Sentinel process receives `SPLITBRAIN_FAULT=sentinel-exit-after-first-correction`. This demo/test hook exits with code 86 immediately after the first correction's receipt is saved as `posted`. The demo reads that checkpoint, restarts the Sentinel without the variable, and verifies delivery of the pending correction. The hook is disabled by default.
+
+Expected summary shape below (example IDs; replace with verified live output):
+
+```text
+RECOVERY SUMMARY
+Arbiter takeover:  primary stopped after proposal v1; arbiter-b adopted #conflict-sb-XXXX-sso from the room document and recorded the decision (same room, same proposal; it writes its own takeover snapshot because Switch only lets a document's creator edit it)
+Sentinel restart:  exited after 1 of 2 corrections; restarted; posted the missing one; each thread has exactly 1 correction
+Duplicate event:   repeated confirmation ignored; still 1 decision, 2 corrections, 1 room
+Room documents:   canonical <original-document-id> preserved; 1 standby-owned recovery snapshot(s)
+```
+
+Every step fails with the expected and observed state if a condition is unmet. The regular `DEMO SUMMARY` is also printed. The live test follows exactly this path: `uv run pytest tests/test_recovery_integration.py -m integration -q -s` (run it alone; it resets the demo stack).
 
 ## Try it yourself
 
