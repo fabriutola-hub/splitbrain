@@ -16,7 +16,7 @@ Sales promises Acme that SSO will be live on December 1, in a public channel. En
 
 ## Quick start
 
-Works on Windows, macOS and Linux with [uv](https://docs.astral.sh/uv/) and Docker running. Three commands:
+Needs [uv](https://docs.astral.sh/uv/) and Docker running. Tested on Windows 11 with Docker Desktop; macOS and Linux should work the same way (the stack runs in Docker and the CLI is plain Python), but we have not tested them. Three commands:
 
 ```bash
 git clone https://github.com/fabriutola-hub/splitbrain.git splitbrain && cd splitbrain
