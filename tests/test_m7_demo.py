@@ -375,6 +375,10 @@ async def test_open_conflict_reuses_a_room_that_already_exists() -> None:
         def __init__(self) -> None:
             self.calls: list[str] = []
 
+        @asynccontextmanager
+        async def act_in(self, room_id: str):
+            yield self
+
         async def op(self, name: str, /, **kwargs: Any) -> Any:
             self.calls.append(name)
             if name == "list_all_rooms":
@@ -431,7 +435,7 @@ async def test_open_conflict_reuses_a_room_that_already_exists() -> None:
     assert "create_room" not in fake.calls
     assert "create_room_document" not in fake.calls
     assert verification.room_id == "r-existing"
-    assert verification.document_id == "doc-1"
+    assert verification.record == "Status: OPEN"
     assert verification.machine is not None
 
 

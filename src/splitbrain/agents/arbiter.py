@@ -18,7 +18,27 @@ from typing import Any
 
 from .. import bootstrap
 from ..config import Settings, SplitbrainError
-from ..core.decision import DecisionMachine, DecisionOutcome, DecisionState
+from ..core.decision import (
+    Confirmation,
+    DecisionMachine,
+    DecisionOutcome,
+    DecisionSnapshot,
+    DecisionState,
+    Proposal,
+)
+from ..core.decision_record import (
+    CONTEXT_LIMIT,
+    CorrectionJournal,
+    DecisionRecord,
+    latest_record,
+    load_correction_journal,
+    load_decision_records,
+    message_id,
+    pending_corrections,
+    posted_message,
+    record_body,
+    render_record,
+)
 from ..core.models import Decision, Evidence
 from ..core.packets import encode
 from ..core.protocol import (
@@ -65,6 +85,7 @@ CONFIDENCE_THRESHOLD = 0.7
 ROLE_RETRY_S = 5.0
 TICK_S = 1.0
 LINK_TIMEOUT_S = 60.0
+CORRECTION_RETRY_S = 30.0
 SLUG_LIMIT = 24
 
 
@@ -146,6 +167,9 @@ class Verification:
     link_future: asyncio.Future[LinkedPacket] | None = None
     link_labels: list[str] = field(default_factory=list)
     finished: bool = False
+    durable: DecisionRecord | None = None
+    lock: asyncio.Lock = field(default_factory=asyncio.Lock)
+    last_correction_request: float = 0.0
 
     @property
     def claims(self) -> tuple[PacketClaim, PacketClaim]:
@@ -174,6 +198,7 @@ class Arbiter:
         self.is_holder = False
         self.stop = asyncio.Event()
         self._role_lock = asyncio.Lock()
+        self._recovery_needed = True
         self.verifications: dict[str, Verification] = {}
         self.by_room: dict[str, str] = {}
         self.seen_candidates: set[str] = set()
@@ -293,6 +318,10 @@ class Arbiter:
         if await self._claim_lease():
             if not was_holder:
                 logger.info("%s now holds the exclusive arbiter lease", self.name)
+                self._recovery_needed = True
+            if self._recovery_needed:
+                await self._recover_rooms()
+                self._recovery_needed = False
             await self._drain_deferred()
 
     async def _drain_deferred(self) -> None:
@@ -310,6 +339,16 @@ class Arbiter:
         while not self.stop.is_set():
             now = asyncio.get_running_loop().time()
             for verification in list(self.verifications.values()):
+                if self.is_holder and verification.decided and not verification.corrected:
+                    if now - verification.last_correction_request >= CORRECTION_RETRY_S:
+                        try:
+                            async with verification.lock:
+                                await self._publish_decision(verification, retry=True)
+                        except Exception:
+                            logger.exception(
+                                "Could not resume corrections for %s", verification.candidate.id
+                            )
+                    continue
                 if verification.finished or verification.room_id is not None:
                     continue
                 if (
@@ -576,43 +615,133 @@ class Arbiter:
         return matches[0] if matches else None
 
     async def _adopt_provisioned_room(self, verification: Verification, room_id: str) -> bool:
-        """If the room already has a brief, adopt its record instead of redoing it."""
-        context = await self.agent.op("read_context", room_id=room_id, limit=60, connection=False)
-        bodies = [
-            str(entry.get("body", ""))
-            for thread in context.get("threads", [])
-            for entry in [thread.get("root", {}), *(thread.get("replies") or [])]
-        ]
-        if not any("Splitbrain found two statements" in body for body in bodies):
-            return False
-        joined = await self.agent.op("connect_to_room", room_id=room_id)
-        name = f"{verification.candidate.id.upper()} decision record"
-        documents = joined.get("documents") or []
-        document_id = next(
-            (
-                str(document["id"])
-                for document in documents
-                if document.get("id") and str(document.get("name", "")) == name
-            ),
-            None,
-        )
-        if document_id is None:
-            raise SplitbrainError(
-                f"#{verification.room_name} already has a brief but no {name!r} document; "
-                "refusing to create a duplicate decision record."
+        """Recover the state from documents; the brief may have left chat history."""
+        records, links = await load_decision_records(self.agent, room_id, verification.candidate.id)
+        selected = latest_record(records)
+        if selected is None:
+            context = await self.agent.op(
+                "read_context", room_id=room_id, limit=CONTEXT_LIMIT, connection=False
             )
-        loaded = await self.agent.op("load_internal_documents", ids=[document_id])
-        verification.document_id = document_id
-        verification.record = "\n".join(str(item.get("content", "")) for item in loaded)
-        verification.link_labels = [
-            str(link["label"]) for link in joined.get("linked_rooms", []) if link.get("label")
-        ]
-        verification.machine = DecisionMachine(*[claim.author for claim in verification.claims])
+            if any(
+                "Splitbrain found two statements" in entry.get("body", "")
+                for thread in context.get("threads", [])
+                for entry in [thread.get("root", {}), *(thread.get("replies") or [])]
+            ):
+                raise SplitbrainError(
+                    f"#{verification.room_name} has a brief but no decision record"
+                )
+            return False
+        verification.record = selected.content
+        verification.durable = selected.state
+        if selected.state is not None:
+            state = selected.state
+            if state.machine.authors != tuple(claim.author for claim in verification.claims):
+                raise SplitbrainError("Decision record owners disagree with the conflict")
+            verification.machine = DecisionMachine.restore(state.machine)
+            verification.origins = state.origins
+            verification.thread_id = state.ops_thread_id
+            verification.corrected = state.corrected
+        else:
+            verification.machine = self._restore_legacy_machine(verification)
+            verification.corrected = "Corrections posted in " in selected.content
+        verification.decided = verification.machine.state == DecisionState.DECIDED
+        own = next(
+            (item for item in records if item.state and item.state.writer == self.name), None
+        )
+        verification.document_id = own.document_id if own else ""
+        verification.link_labels = [str(link["label"]) for link in links if link.get("label")]
         logger.warning(
             "Reused #%s: brief and decision record already exist; nothing was duplicated.",
             verification.room_name,
         )
         return True
+
+    def _restore_legacy_machine(self, verification: Verification) -> DecisionMachine:
+        """Preserve final decisions made before versioned snapshots were introduced."""
+        authors = tuple(claim.author for claim in verification.claims)
+        snapshot = DecisionSnapshot(conflict_id=verification.candidate.id, authors=authors)
+        if "Status: DECIDED" in verification.record:
+            decision = re.search(r'^Decision: "(.*)"$', verification.record, re.MULTILINE)
+            proposer = re.search(r"^Proposed by: @(.+)$", verification.record, re.MULTILINE)
+            confirmer = re.search(r"^Confirmed by: @(.+)$", verification.record, re.MULTILINE)
+            if not (decision and proposer and confirmer):
+                raise SplitbrainError("Cannot recover an incomplete legacy DECIDED record")
+            when = re.search(r"^Decided at: (.+)$", verification.record, re.MULTILINE)
+            snapshot.state = DecisionState.DECIDED
+            snapshot.version = 1
+            snapshot.proposals = [Proposal(version=1, author=proposer[1], text=decision[1])]
+            snapshot.confirmations = [
+                Confirmation(version=1, author=confirmer[1], confirmed_at=when[1] if when else "")
+            ]
+        return DecisionMachine.restore(snapshot)
+
+    async def _recover_rooms(self) -> None:
+        await self.coverage.refresh()
+        for room_id, room_name in list(self.coverage.rooms.items()):
+            match = re.match(r"^conflict-(sb-[a-z0-9]+)-", room_name)
+            if not match:
+                continue
+            records, _ = await load_decision_records(self.agent, room_id, match[1])
+            selected = latest_record(records)
+            if selected is None or selected.state is None:
+                continue
+            state = selected.state
+            verification = self.verifications.get(state.candidate.id) or Verification(
+                candidate=state.candidate,
+                thread_id=state.ops_thread_id,
+                requested_at=0.0,
+                room_id=room_id,
+                room_name=room_name,
+            )
+            async with verification.lock:
+                await self._adopt_provisioned_room(verification, room_id)
+                self.verifications[state.candidate.id] = verification
+                self.by_room[room_id] = state.candidate.id
+                self.seen_candidates.add(state.candidate.id)
+                if verification.decided and not verification.corrected:
+                    await self._publish_decision(verification, retry=True)
+                elif not verification.decided:
+                    await self._announce_proposal(verification)
+
+    async def _save_record(self, verification: Verification) -> None:
+        if verification.machine is None:
+            raise SplitbrainError("Cannot save a decision record without its machine")
+        previous = verification.durable
+        state = DecisionRecord(
+            candidate=verification.candidate,
+            machine=verification.machine.snapshot(),
+            origins=verification.origins,
+            ops_thread_id=verification.thread_id,
+            writer=self.name,
+            revision=(previous.revision if previous else 0) + 1,
+            decision_announced=previous.decision_announced if previous else False,
+            decision_sent=previous.decision_sent if previous else False,
+            corrected=verification.corrected,
+            corrections=(
+                previous.corrections
+                if previous and previous.corrections
+                else pending_corrections(verification.origins)
+                if verification.machine.state == DecisionState.DECIDED
+                else []
+            ),
+        )
+        content = render_record(verification.record, state)
+        async with self.agent.act_in(verification.room_id or ""):
+            if verification.document_id:
+                await self.agent.op(
+                    "update_room_document", document_id=verification.document_id, content=content
+                )
+            else:
+                document = await self.agent.op(
+                    "create_room_document",
+                    name=f"{verification.candidate.id.upper()} decision record ({self.name})",
+                    description=f"Recovered decision record for {verification.candidate.id}",
+                    instructions="Only its writer edits this snapshot; people decide its content.",
+                    content=content,
+                )
+                verification.document_id = str(document["document_id"])
+        verification.durable = state
+        verification.record = content
 
     async def _open_conflict(self, verification: Verification) -> None:
         if not self.is_holder or verification.room_id is not None or verification.finished:
@@ -664,9 +793,22 @@ class Arbiter:
             for claim in candidate.claims
         ]
         if existing is not None and await self._adopt_provisioned_room(verification, room_id):
+            if verification.decided and not verification.corrected:
+                await self._publish_decision(verification, retry=True)
+            elif not verification.decided:
+                await self._announce_proposal(verification)
             return
         verification.link_labels = await self._link_origins(verification)
+        verification.machine = DecisionMachine(a.author, b.author, conflict_id=candidate.id)
         verification.record = self._open_record(verification)
+        verification.durable = DecisionRecord(
+            candidate=candidate,
+            machine=verification.machine.snapshot(),
+            origins=verification.origins,
+            ops_thread_id=verification.thread_id,
+            writer=self.name,
+        )
+        verification.record = render_record(verification.record, verification.durable)
         # Claim the room: new rooms are not covered by the stream on their own.
         async with self.agent.act_in(room_id):
             document = await self.agent.op(
@@ -677,7 +819,6 @@ class Arbiter:
                 content=verification.record,
             )
         verification.document_id = str(document["document_id"])
-        verification.machine = DecisionMachine(a.author, b.author)
         await self.agent.post(room_id, self._brief(verification))
         logger.info(
             "Conflict room #%s ready for %s (document %s, links %s, reused=%s)",
@@ -833,23 +974,78 @@ class Arbiter:
         if verification is None or verification.machine is None or verification.room_id is None:
             return
         author = frame.payload.sender_name
-        if author.startswith("splitbrain-") or (frame.payload.sender_kind or "") == "platform":
+        if author.startswith("splitbrain-") or (frame.payload.sender_kind or "").casefold() in {
+            "agent",
+            "platform",
+        }:
             return
-        outcome = verification.machine.handle(author, frame.payload.body)
-        if outcome.reply:
-            # A proposal announcement belongs in the channel itself: a threaded
-            # reply is easy to miss in Mattermost's collapsed-thread view.
-            if outcome.announce:
-                await self.agent.post(verification.room_id, outcome.reply)
-            else:
-                await self.agent.post(
-                    verification.room_id, outcome.reply, thread_id=reply_thread(frame)
-                )
-        if outcome.state == DecisionState.DECIDED and not verification.decided:
-            await self._on_decided(verification, outcome)
+        if not self.is_holder:
+            return
+        async with verification.lock:
+            before = verification.machine.snapshot()
+            record_before = verification.record
+            durable_before = (
+                verification.durable.model_copy(deep=True) if verification.durable else None
+            )
+            outcome = verification.machine.handle(
+                author,
+                frame.payload.body,
+                message_id=frame.payload.message_id,
+                timestamp=frame.payload.timestamp,
+                thread_id=frame.payload.thread_id,
+                sender_kind=frame.payload.sender_kind,
+            )
+            if outcome.state == DecisionState.DECIDED:
+                if not verification.decided:
+                    try:
+                        await self._on_decided(verification, outcome)
+                    except Exception:
+                        if not verification.decided:
+                            verification.machine = DecisionMachine.restore(before)
+                            verification.record = record_before
+                            verification.durable = durable_before
+                        raise
+                elif not verification.corrected:
+                    await self._publish_decision(verification)
+                return
+            if verification.machine.snapshot() != before:
+                try:
+                    await self._save_record(verification)
+                except Exception:
+                    verification.machine = DecisionMachine.restore(before)
+                    raise
+            if outcome.reply:
+                if outcome.announce:
+                    await self._announce_proposal(verification)
+                else:
+                    await self.agent.post(
+                        verification.room_id, outcome.reply, thread_id=reply_thread(frame)
+                    )
+            elif (
+                verification.machine.proposals
+                and verification.machine.proposals[-1].message_id == frame.payload.message_id
+            ):
+                await self._announce_proposal(verification)
+
+    async def _announce_proposal(self, verification: Verification) -> None:
+        machine = verification.machine
+        if machine is None or machine.state != DecisionState.PROPOSED:
+            return
+        proposal = machine.proposals[-1]
+        if any(ident != proposal.message_id for ident in proposal.thread_ids):
+            return
+        body = machine.proposal_reply()
+        context = await self.agent.op(
+            "read_context", room_id=verification.room_id, limit=CONTEXT_LIMIT, connection=False
+        )
+        ident = posted_message(context, body, {AGENT_NAME, STANDBY_NAME})
+        if not ident:
+            result = await self.agent.post(verification.room_id or "", body)
+            ident = message_id(result)
+        machine.bind_announcement(ident)
+        await self._save_record(verification)
 
     async def _on_decided(self, verification: Verification, outcome: DecisionOutcome) -> None:
-        verification.decided = True
         decision = Decision(
             candidate_id=verification.candidate.id,
             room_id=verification.room_id or "",
@@ -858,36 +1054,38 @@ class Arbiter:
             confirmed_by=outcome.confirmed_by or "",
             decided_at=outcome.decided_at or "",
         )
-        verification.record = verification.record.replace("Status: OPEN", "Status: DECIDED")
+        verification.record = record_body(verification.record).replace(
+            "Status: OPEN", "Status: DECIDED"
+        )
         verification.record += "\n".join(
             [
                 "",
                 "",
                 f'Decision: "{decision.text}"',
+                f"Decision version: v{outcome.version}",
                 f"Proposed by: @{decision.proposed_by}",
                 f"Confirmed by: @{decision.confirmed_by}",
                 f"Decided at: {stamp_iso(decision.decided_at)}",
             ]
         )
-        async with self.agent.act_in(verification.room_id or ""):
-            await self.agent.op(
-                "update_room_document",
-                document_id=verification.document_id,
-                content=verification.record,
-            )
-        # Mattermost shows "📄 updated room document", not the document itself,
-        # so the record has to be visible as a chat message too.
-        await self.agent.post(
-            verification.room_id or "",
-            f'Decision recorded: "{decision.text}" '
-            f"(proposed by @{decision.proposed_by}, "
-            f"confirmed by @{decision.confirmed_by}, "
-            f"{stamp_iso(decision.decided_at)}). "
-            "Correcting the original threads now.",
-        )
-        packet = DecidedPacket(
+        await self._save_record(verification)
+        verification.decided = True
+        await self._publish_decision(verification)
+
+    def _decision_packet(self, verification: Verification) -> DecidedPacket:
+        machine = verification.machine
+        if machine is None or machine.state != DecisionState.DECIDED:
+            raise SplitbrainError("Only a final human decision can be published")
+        return DecidedPacket(
             candidate_id=verification.candidate.id,
-            decision=decision,
+            decision=Decision(
+                candidate_id=verification.candidate.id,
+                room_id=verification.room_id or "",
+                text=machine.decision or "",
+                proposed_by=machine.proposed_by or "",
+                confirmed_by=machine.confirmed_by or "",
+                decided_at=machine.decided_at or "",
+            ),
             conflict_room=verification.room_id or "",
             conflict_room_name=verification.room_name,
             origins=verification.origins,
@@ -897,14 +1095,56 @@ class Arbiter:
             scope_key=verification.candidate.claim_a.scope_key,
             authors=[claim.author for claim in verification.claims],
         )
-        await self.agent.targeted(
-            self.ops_room_id,
+
+    async def _publish_decision(self, verification: Verification, *, retry: bool = False) -> None:
+        _, journal = await load_correction_journal(
+            self.agent, verification.room_id or "", verification.candidate.id
+        )
+        if journal is not None and journal.complete and journal.notified:
+            await self._finish_corrections(verification, journal)
+            return
+        packet = self._decision_packet(verification)
+        decision = packet.decision
+        if verification.durable is None:
+            await self._save_record(verification)
+        state = verification.durable
+        assert state is not None
+        # Mattermost shows "📄 updated room document", not the document itself,
+        # so the record has to be visible as a chat message too.
+        body = (
+            f'Decision recorded: "{decision.text}" '
+            f"(proposed by @{decision.proposed_by}, "
+            f"confirmed by @{decision.confirmed_by}, "
+            f"{stamp_iso(decision.decided_at)}). "
+            "Correcting the original threads now."
+        )
+        if not state.decision_announced:
+            context = await self.agent.op(
+                "read_context", room_id=verification.room_id, limit=CONTEXT_LIMIT, connection=False
+            )
+            if not posted_message(context, body, {AGENT_NAME, STANDBY_NAME}):
+                await self.agent.post(verification.room_id or "", body)
+            state.decision_announced = True
+            await self._save_record(verification)
+        body = (
             f'Decision recorded for {verification.candidate.id.upper()}: "{decision.text}" '
             f"(proposed by @{decision.proposed_by}, confirmed by @{decision.confirmed_by}). "
-            "Sentinel, please correct both original threads.\n" + encode("decided", packet),
-            target_names=[SENTINEL_NAME],
-            thread_id=verification.thread_id,
+            "Sentinel, please correct both original threads.\n" + encode("decided", packet)
         )
+        if not state.decision_sent or retry:
+            verification.last_correction_request = asyncio.get_running_loop().time()
+            context = await self.agent.op(
+                "read_context", room_id=self.ops_room_id, limit=CONTEXT_LIMIT, connection=False
+            )
+            if retry or not posted_message(context, body, {AGENT_NAME, STANDBY_NAME}):
+                await self.agent.targeted(
+                    self.ops_room_id,
+                    body,
+                    target_names=[SENTINEL_NAME],
+                    thread_id=verification.thread_id,
+                )
+            verification.durable.decision_sent = True
+            await self._save_record(verification)
         logger.info(
             "Decision recorded for %s in #%s: %s",
             verification.candidate.id,
@@ -916,24 +1156,50 @@ class Arbiter:
         """Append the final line to the record and confirm in the conflict room."""
         verification = self.verifications.get(packet.candidate_id)
         if (
-            verification is None
+            not self.is_holder
+            or verification is None
             or verification.room_id is None
             or verification.corrected
             or not verification.decided
         ):
             return
-        verification.corrected = True
-        rooms = ", ".join(f"#{room}" for room in packet.rooms) or "both original threads"
-        line = f"Corrections posted in {rooms}"
-        verification.record += f"\n\n{line}"
-        async with self.agent.act_in(verification.room_id):
-            await self.agent.op(
-                "update_room_document",
-                document_id=verification.document_id,
-                content=verification.record,
+        async with verification.lock:
+            if verification.corrected:
+                return
+            _, journal = await load_correction_journal(
+                self.agent, verification.room_id, packet.candidate_id
             )
-        await self.agent.post(verification.room_id, f"{line}.")
-        logger.info("%s for %s", line, packet.candidate_id)
+            if journal is None or not journal.complete:
+                raise SplitbrainError(
+                    "Cannot mark corrections complete without all thread receipts"
+                )
+            await self._finish_corrections(verification, journal)
+
+    async def _finish_corrections(
+        self, verification: Verification, journal: CorrectionJournal
+    ) -> None:
+        if verification.corrected:
+            return
+        if verification.durable is None:
+            await self._save_record(verification)
+        verification.durable.corrections = journal.threads
+        rooms = ", ".join(f"#{item.room_name}" for item in journal.threads)
+        line = f"Corrections posted in {rooms}"
+        verification.record = record_body(verification.record)
+        if line not in verification.record:
+            verification.record += f"\n\n{line}"
+        verification.corrected = True
+        try:
+            await self._save_record(verification)
+        except Exception:
+            verification.corrected = False
+            raise
+        context = await self.agent.op(
+            "read_context", room_id=verification.room_id, limit=CONTEXT_LIMIT, connection=False
+        )
+        if not posted_message(context, f"{line}.", {AGENT_NAME, STANDBY_NAME}):
+            await self.agent.post(verification.room_id or "", f"{line}.")
+        logger.info("%s for %s", line, verification.candidate.id)
 
     async def _on_reminded(self, frame: MessageFrame, packet: RemindedPacket) -> None:
         """Record a decision-memory reminder in the conflict room document and chat."""
@@ -956,6 +1222,13 @@ class Arbiter:
             else packet.conflict_room
         )
         if not room_id:
+            return
+        if verification is not None and verification.machine is not None:
+            async with verification.lock:
+                verification.record = record_body(verification.record) + f"\n\n{record_line}"
+                await self._save_record(verification)
+            await self.agent.post(room_id, chat_line)
+            self.reminded_messages.add(packet.message_id)
             return
         document_id = verification.document_id if verification is not None else ""
         record = verification.record if verification is not None else ""
