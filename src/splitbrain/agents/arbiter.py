@@ -95,9 +95,12 @@ def _person(author: str) -> str:
     return bootstrap.DEMO_USER_DISPLAY_NAMES.get(author, author)
 
 
+CONFIRMED_EVIDENCE_STATUSES = frozenset({"supports_a", "supports_b", "conflicting"})
+
+
 def verdict_for(confidence: float, evidence_status: str) -> str:
     """Confirm only with enough classifier confidence and independent evidence."""
-    if confidence >= CONFIDENCE_THRESHOLD and evidence_status != "none":
+    if confidence >= CONFIDENCE_THRESHOLD and evidence_status in CONFIRMED_EVIDENCE_STATUSES:
         return "confirmed"
     return "discarded"
 
@@ -460,15 +463,22 @@ class Arbiter:
             evidence_status=evidence.status,
             reason=reason,
         )
-        readable = (
-            f"Verdict for {evidence.candidate_id.upper()}: {verification.verdict.upper()}. "
-            f"{reason}. "
-            + (
-                "Convening the two authors."
-                if confirmed
-                else "No evidence, no interruption: nobody is contacted."
+        if confirmed:
+            readable = (
+                f"Verdict for {evidence.candidate_id.upper()}: {verification.verdict.upper()}. "
+                f"{reason}. Convening the two authors."
             )
-        )
+        elif evidence.status == "inconclusive":
+            detail = (evidence.summary or reason).rstrip(".")
+            readable = (
+                f"Verdict for {evidence.candidate_id.upper()}: DISCARDED. "
+                f"Evidence was inconclusive: {detail}. Nobody is contacted."
+            )
+        else:
+            readable = (
+                f"Verdict for {evidence.candidate_id.upper()}: {verification.verdict.upper()}. "
+                f"{reason}. No evidence, no interruption: nobody is contacted."
+            )
         await self.agent.post(
             self.ops_room_id,
             readable + "\n" + encode("verdict", verdict),

@@ -305,7 +305,14 @@ def test_refund_evidence_points_at_issue_5() -> None:
             ]
         }
     )
-    evidence = build_evidence("sb-0002", "refunds", filtered, source="fixture")
+    evidence = build_evidence(
+        "sb-0002",
+        "refunds",
+        filtered,
+        source="fixture",
+        claim_a="refunds above $500",
+        claim_b="threshold is $250",
+    )
     assert evidence.status == "conflicting"
     assert 'issue #5 "Support macros: refunds over $250' in evidence.summary
     assert "GitHub, fabriutola-hub/splitbrain-demo-roadmap" in evidence.detail

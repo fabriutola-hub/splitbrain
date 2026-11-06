@@ -168,10 +168,13 @@ class EvidenceItem(BaseModel):
     updated_at: str = ""
 
 
+EvidenceStatus = Literal["supports_a", "supports_b", "conflicting", "inconclusive", "none"]
+
+
 class Evidence(BaseModel):
     candidate_id: str
     source: Literal["github", "fixture", "scenario_fixture"]
-    status: Literal["supports_a", "supports_b", "conflicting", "none"]
+    status: EvidenceStatus
     items: list[EvidenceItem] = Field(default_factory=list)
     # `summary` is one short source-free sentence for the brief; `detail` keeps
     # the full timeline/counts for the decision record and the ops thread.

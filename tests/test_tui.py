@@ -285,3 +285,77 @@ def test_tui_log_lines_are_time_and_event_only() -> None:
     assert "INFO" not in line
     assert "splitbrain.agents.sentinel" not in line
     assert line.endswith("Asked @tomas for consent in #engineering (sb-1847)")
+
+
+async def test_inconclusive_discard_is_shown_in_tui_and_log() -> None:
+    from splitbrain import seed
+    from splitbrain.agents.sentinel import Sentinel
+    from splitbrain.core.models import Evidence
+    from splitbrain.core.packets import encode
+    from splitbrain.core.protocol import VerdictPacket
+    from splitbrain.switch.events import MessageFrame, MessagePayload
+
+    view = SentinelTui(_llm(), width=120, height=32)  # type: ignore[arg-type]
+    logger = logging.getLogger("splitbrain.agents.sentinel")
+    handler = view.log_handler()
+    logger.addHandler(handler)
+    logger.setLevel(logging.INFO)
+    try:
+        view.add_candidate(
+            CandidateLink(
+                candidate_id="sb-0001",
+                a=ClaimView("sales", "maria", "SSO", "Acme", "Dec 1", "clm_1"),
+                b=ClaimView("engineering", "tomas", "SSO", "*", "Q4 removed", "clm_2"),
+                confidence=0.95,
+                reason="dates",
+            )
+        )
+        sentinel = Sentinel(
+            agent=object(),  # type: ignore[arg-type]
+            llm=object(),  # type: ignore[arg-type]
+            store=object(),  # type: ignore[arg-type]
+            state=seed.synthetic_state(),
+            tui=view,
+        )
+        ev = Evidence(
+            candidate_id="sb-0001",
+            source="github",
+            status="inconclusive",
+            summary='1 open issue(s) mention "SSO", but none mentions Q4 or December 1.',
+        )
+        verdict = VerdictPacket(
+            candidate_id="sb-0001",
+            verdict="discarded",
+            confidence=0.95,
+            evidence_status="inconclusive",
+            reason="classifier confidence 0.95, evidence status inconclusive",
+        )
+        await sentinel.on_frame(
+            MessageFrame(
+                kind="message",
+                sequence=1,
+                room_id="r-splitbrain-ops",
+                payload=MessagePayload(
+                    message_id="sw_1",
+                    sender_name="splitbrain-verifier",
+                    body="Evidence.\n" + encode("evidence", ev),
+                ),
+            )
+        )
+        await sentinel.on_frame(
+            MessageFrame(
+                kind="message",
+                sequence=2,
+                room_id="r-splitbrain-ops",
+                payload=MessagePayload(
+                    message_id="sw_2",
+                    sender_name="splitbrain-arbiter",
+                    body="Verdict.\n" + encode("verdict", verdict),
+                ),
+            )
+        )
+        rendered = _render(view)
+        assert "verdict DISCARDED (inconclusive)" in rendered
+        assert "No alert: sb-0001 discarded (inconclusive)" in rendered
+    finally:
+        logger.removeHandler(handler)

@@ -16,7 +16,7 @@ from .. import bootstrap
 from ..config import Settings, SplitbrainError
 from ..core.models import Evidence
 from ..core.packets import encode
-from ..core.protocol import EvidenceRequestPacket, read_packet
+from ..core.protocol import EvidenceClaim, EvidenceRequestPacket, read_packet
 from ..evidence.github import (
     FIXTURE_BANNER,
     EvidenceSettings,
@@ -174,7 +174,11 @@ class Verifier:
         else:
             try:
                 evidence = await self._github_evidence(
-                    payload.candidate_id, subject, payload.subject_key
+                    payload.candidate_id,
+                    subject,
+                    payload.subject_key,
+                    claim_a=payload.claim_a,
+                    claim_b=payload.claim_b,
                 )
             except SplitbrainEvidenceError as exc:
                 logger.error("EVIDENCE ERROR for %s: %s", payload.candidate_id, exc)
@@ -196,7 +200,15 @@ class Verifier:
             "Evidence %s for %s: %s", evidence.status, payload.candidate_id, evidence.summary
         )
 
-    async def _github_evidence(self, candidate_id: str, subject: str, subject_key: str) -> Evidence:
+    async def _github_evidence(
+        self,
+        candidate_id: str,
+        subject: str,
+        subject_key: str,
+        *,
+        claim_a: EvidenceClaim | None = None,
+        claim_b: EvidenceClaim | None = None,
+    ) -> Evidence:
         if self.provider is None:
             raise SplitbrainError("Evidence request arrived before the GitHub reference was loaded")
         terms = [subject, subject_key.replace("-", " ").replace("_", " "), *subject.split()]
@@ -208,6 +220,8 @@ class Verifier:
             matched,
             snapshot,
             source="fixture" if self.evidence_settings.mode == "fixture" else "github",
+            claim_a=claim_a,
+            claim_b=claim_b,
         )
 
     @staticmethod

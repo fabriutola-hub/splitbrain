@@ -42,6 +42,7 @@ from ..core.protocol import (
     LinkedPacket,
     LinkRequestPacket,
     RemindedPacket,
+    VerdictPacket,
     read_packet,
 )
 from ..core.store import ClaimStore, pair_id
@@ -330,11 +331,14 @@ class Sentinel:
         if kind == "evidence" and isinstance(payload, Evidence):
             step(candidate_id, "evidence", f"evidence: {evidence_step_text(payload)}")
         elif kind == "verdict":
-            step(
-                candidate_id,
-                "verdict",
-                f"verdict {str(getattr(payload, 'verdict', '')).upper()}",
+            verdict_word = str(getattr(payload, "verdict", "")).upper()
+            status = str(getattr(payload, "evidence_status", ""))
+            label = (
+                f"verdict {verdict_word} ({status})"
+                if verdict_word == "DISCARDED" and status not in ("", "none")
+                else f"verdict {verdict_word}"
             )
+            step(candidate_id, "verdict", label)
         elif kind == "consent_request":
             step(
                 candidate_id,
@@ -513,6 +517,14 @@ class Sentinel:
             return
         if kind == "consent_request" and isinstance(payload, ConsentRequestPacket):
             await self._ask_consent(frame, payload)
+        elif kind == "verdict" and isinstance(payload, VerdictPacket):
+            if payload.verdict == "discarded":
+                logger.info(
+                    "No alert: %s discarded (%s): %s",
+                    payload.candidate_id,
+                    payload.evidence_status,
+                    payload.reason,
+                )
         elif kind == "decided" and isinstance(payload, DecidedPacket):
             await self._apply_corrections(frame, payload)
         elif kind == "link_request" and isinstance(payload, LinkRequestPacket):

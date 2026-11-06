@@ -14,7 +14,7 @@ from typing import Any, Literal, TypeVar
 
 from pydantic import BaseModel, ConfigDict, ValidationError
 
-from .models import Decision, Evidence
+from .models import Decision, Evidence, EvidenceStatus
 from .packets import decode_message
 
 logger = logging.getLogger(__name__)
@@ -93,7 +93,7 @@ class VerdictPacket(WireModel):
     candidate_id: str
     verdict: Literal["confirmed", "discarded"]
     confidence: float = 0.0
-    evidence_status: str = "none"
+    evidence_status: EvidenceStatus = "none"
     reason: str = ""
 
 
