@@ -409,6 +409,24 @@ async def _wait_for_packet(
         await asyncio.sleep(POLL_S)
 
 
+async def _wait_for_human_close(
+    group: AgentGroup,
+    observer: SwitchAgent,
+    ops_id: str,
+    conflict_room: str,
+) -> tuple[dict[str, Any] | None, list[str]]:
+    """Wait for the human decision's corrections and the Arbiter's closing line."""
+    await _wait_for_packet(group, observer, ops_id, "corrected", HUMAN_DECISION_TIMEOUT_S)
+    await _wait_for_room_marker(
+        group, observer, conflict_room, seed.CORRECTIONS_MARKER, seed.CORRECTIONS_TIMEOUT_S
+    )
+    decided = await _ops_packet(observer, ops_id, "decided")
+    corrected = await _ops_packet(observer, ops_id, "corrected")
+    decision = decided.get("decision", {}) if decided else None
+    corrections = list(corrected.get("rooms", [])) if corrected else []
+    return decision, corrections
+
+
 async def _wait_for_followup_silence(group: AgentGroup, timeout_s: float = 15.0) -> None:
     """Wait until the Sentinel has also classified Pablo's compatible follow-up message."""
     sentinel = next((child for child in group.children if child.name == "sentinel"), None)
@@ -462,14 +480,44 @@ async def _conflict_room_ids(observer: SwitchAgent, room_name: str) -> list[str]
     return ids
 
 
-async def _brief_in(observer: SwitchAgent, room_id: str) -> str | None:
-    context = await observer.op("read_context", room_id=room_id, limit=60, connection=False)
-    bodies = [
+async def _room_bodies(observer: SwitchAgent, room_id: str, limit: int = 60) -> list[str]:
+    context = await observer.op("read_context", room_id=room_id, limit=limit, connection=False)
+    return [
         str(entry.get("body", ""))
         for thread in context.get("threads", [])
         for entry in [thread.get("root", {}), *(thread.get("replies") or [])]
     ]
-    return next((body for body in bodies if seed.BRIEF_MARKER in body), None)
+
+
+async def _brief_in(observer: SwitchAgent, room_id: str) -> str | None:
+    return next(
+        (body for body in await _room_bodies(observer, room_id) if seed.BRIEF_MARKER in body),
+        None,
+    )
+
+
+async def _wait_for_room_marker(
+    group: AgentGroup,
+    observer: SwitchAgent,
+    room_name: str,
+    marker: str,
+    timeout_s: float,
+) -> str:
+    """Wait for a chat line that starts with `marker` in a conflict room."""
+    deadline = time.monotonic() + timeout_s
+    while True:
+        group.check()
+        for room_id in await _conflict_room_ids(observer, room_name):
+            for body in await _room_bodies(observer, room_id, limit=200):
+                if any(line.startswith(marker) for line in body.splitlines()):
+                    return body
+        if time.monotonic() >= deadline:
+            raise SplitbrainError(
+                f"Timed out after {timeout_s:.0f}s waiting for the Arbiter's "
+                f"{marker!r} closing line in #{room_name}. The demo summary promises "
+                "that line after the Sentinel corrects both threads; check the arbiter logs."
+            )
+        await asyncio.sleep(POLL_S)
 
 
 async def _wait_for_brief(
@@ -720,11 +768,9 @@ async def run(
                 )
         elif loaded.decision is not None:
             print_decision_instructions(loaded, conflict_room, settings)
-            await _wait_for_packet(group, observer, ops_id, "corrected", HUMAN_DECISION_TIMEOUT_S)
-            decided = await _ops_packet(observer, ops_id, "decided")
-            decision = decided.get("decision", {}) if decided else None
-            corrected = await _ops_packet(observer, ops_id, "corrected")
-            corrections = list(corrected.get("rooms", [])) if corrected else []
+            decision, corrections = await _wait_for_human_close(
+                group, observer, ops_id, conflict_room
+            )
             note = "decided by people in Mattermost; corrections propagated"
         else:
             missing = [message.person for message in loaded.messages if message.text not in brief]
