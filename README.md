@@ -145,6 +145,8 @@ flowchart TB
 
 All inter-agent state travels as normal Switch messages. Locally we keep only `.splitbrain/state.json` (agent credentials, room ids and the demo password), `.splitbrain/seeded_scenarios.json` (which scenario was already posted against this stack) and the Sentinel's SQLite database `.splitbrain/sentinel.db` (`src/splitbrain/core/store.py`) for claims, candidates and idempotency.
 
+The Sentinel considers every relevant match for a new claim, orders them (recorded decisions first, then newest) and classifies up to `SPLITBRAIN_SENTINEL_MAX_MATCHES` (default 3) in `Sentinel.analyze_messages`; one contradiction wins and the rest are logged. Pair states in `ClaimStore` move pending → classifying → done/failed, and `Sentinel._process_pair` retries transient model failures with backoff (three attempts) without re-sending a candidate.
+
 ### The three agents
 
 Role instructions shown in Switch live in `agents/sentinel.md`, `agents/arbiter.md` and `agents/verifier.md`.

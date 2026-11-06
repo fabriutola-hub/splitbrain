@@ -16,6 +16,7 @@ def claim(
     scope_key: str = "acme",
     kind: ClaimKind = ClaimKind.COMMITMENT,
     status: ClaimStatus = ClaimStatus.ACTIVE,
+    ts: int = 0,
 ) -> Claim:
     return Claim(
         id=identifier,
@@ -33,6 +34,7 @@ def claim(
         polarity="affirm",
         confidence=0.9,
         status=status,
+        ts=ts,
     )
 
 
@@ -104,3 +106,12 @@ def test_multiple_active_claims_returns_all_matches() -> None:
     new = claim("new", room="engineering", author="tomas")
     stored = [claim("old1", room="sales"), claim("old2", room="support")]
     assert {c.id for c in find_matches(new, stored)} == {"old1", "old2"}
+
+
+def test_matches_are_decisions_first_then_most_recent() -> None:
+    new = claim("new", room="engineering", author="tomas", ts=500)
+    old = claim("old", room="sales", ts=100)
+    recent = claim("recent", room="support", ts=300)
+    decision = claim("decision", room="conflict-sb-0001-sso", kind=ClaimKind.DECISION, ts=50)
+    matches = find_matches(new, [old, recent, decision])
+    assert [item.id for item in matches] == ["decision", "recent", "old"]
