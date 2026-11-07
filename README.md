@@ -18,7 +18,7 @@ A two-minute path through the project:
 | **See it in chat** | Open http://localhost:8065 and log in as `maria` or `tomas` with the password printed in the `DEMO SUMMARY`, which also links to the private conflict room. |
 | **How Switch is used** | [Every Switch feature and the file that uses it](#how-splitbrain-uses-switch): the event stream, agent-created private rooms, an exclusive role with a standby, room documents as the decision record, `link_rooms`, a GitHub reference and two YAML templates. Without Switch there is no transport and no shared state. |
 | **What we found in Switch** | [A reproducible race in the exclusive role lease](#what-we-found-in-switch-0310), plus four protocol details that cost us time. |
-| **Does it work** | 616 unit tests, 5 integration tests. Precision / recall / F1: [44-pair replay](#evaluation) **1.000 / 0.889 / 0.941** (unchanged); [v2](#unseen-cases-v2) **0.927 / 0.600 / 0.728 → 0.849 / 0.857 / 0.853** (partly used for tuning); [blind v3](#blind-cases-v3) **1.000 / 0.633 / 0.775 → 1.000 / 0.900 / 0.947**. Live comparisons are means of three runs per version. |
+| **Does it work** | **704 unit tests**, 5 integration tests. Precision / recall / F1: [44-pair replay](#evaluation) **1.000 / 0.889 / 0.941** (2 label errors); final live [v2](#unseen-cases-v2) **0.968 / 0.857 / 0.909** (development data, 15 label errors/run); [blind v3](#blind-cases-v3) **1.000 / 0.900 / 0.947** (4 label errors/run). Live figures are means of three runs with the final prefilter + classifier guard + matcher. |
 | **Honest limits** | [Known limits](#known-limits): tested on Windows 11 and on Mattermost only. |
 
 Sales promises Acme that SSO will be live on December 1, in a public channel. Engineering pulls SSO out of Q4, in a private channel. Nobody is a member of both rooms, so nobody sees both statements. The Sentinel is: it listens to every room over a `scope=all&filter=all` event stream, records both claims, and the other two agents convene the only people who can resolve the difference.
@@ -205,9 +205,9 @@ These are enforced in code, not just prose:
 
 ## Evaluation
 
-`uv run splitbrain eval` runs the same prefilter → extraction → matching → classification → candidate pipeline as the Sentinel over the 44 labeled pairs in `eval/dataset.jsonl` (18 contradictions, 4 updates, 8 compatible, 14 unrelated), prints the metrics and writes `eval/results.md`. It is offline by default: it answers from the committed semantic cassettes in `cassettes/` (101 extraction, 37 classification) and makes no network calls. `uv run splitbrain record` refreshes them with a live model; `uv run splitbrain eval --mode live` needs an API key. A replay miss raises `ReplayMiss` naming the input — it never invents an answer.
+`uv run splitbrain eval` runs the same prefilter → extraction → matching → classification → candidate pipeline as the Sentinel over the 44 labeled pairs in `eval/dataset.jsonl` (18 contradictions, 4 updates, 8 compatible, 14 unrelated), prints the metrics and writes `eval/results.md`. It is offline by default: it answers from the committed semantic cassettes in `cassettes/` (101 extraction, 39 classification) and makes no network calls. `uv run splitbrain record` refreshes them with a live model; `uv run splitbrain eval --mode live` needs an API key. A replay miss raises `ReplayMiss` naming the input — it never invents an answer.
 
-Recorded run (`eval/results.md`, 2026-11-04, mode `replay`, model `deepseek-ai/DeepSeek-V4.1-Flash-1017` via `https://api.river.ai/v1`):
+Current [replay report](eval/results.md), recorded on 2026-11-07 UTC using cassettes from `deepseek-ai/DeepSeek-V4.1-Flash-1017` via `https://api.river.ai/v1`:
 
 | metric | contradiction |
 | --- | --- |
@@ -220,34 +220,34 @@ Recorded run (`eval/results.md`, 2026-11-04, mode `replay`, model `deepseek-ai/D
 | --- | --- | --- | --- | --- |
 | contradiction | 16 | 0 | 0 | 2 |
 | update | 0 | 4 | 0 | 0 |
-| compatible | 0 | 0 | 7 | 1 |
+| compatible | 0 | 0 | 8 | 0 |
 | unrelated | 0 | 0 | 0 | 14 |
 
 Near-contradictions it rejects, in `eval/dataset.jsonl` and `seed/scenarios/near-misses.yaml`: the same feature for a different customer (Acme 99.9% vs Globex 99.5% SLA); a person correcting their own earlier statement; a December beta and Q1 general availability being two phases of one rollout (`No alert: compatible (confidence 0.90)`); a question ("are we still shipping…?") and a hypothetical ("if we delayed…") that extract zero claims; and a later message from the same team that already supersedes. Running `seed near-misses` produces no candidate and no conflict room.
 
-The three errors are real and listed in `eval/results.md`: two false negatives where a global commitment ("99.5% for all customers", "net 30 for all new contracts") is labelled a contradiction against a specific signed customer promise but classified `unrelated` on scope, and one compatible pair rejected by the matcher (different subject). We did not tune the dataset to hide them.
+The two remaining errors are false negatives c05 and c10: the classifier treats a global SLA/payment policy and a specific customer promise as different scopes. The new matcher fixes n21, the compatible beta/GA pair previously rejected as different subjects. Contradiction precision/recall/F1 stay unchanged; label errors fall from three to two. Dataset labels are unchanged.
 
 ### Live model runs
 
-`uv run splitbrain eval --mode live` runs the dataset against the live endpoint and writes [`eval/results-live.md`](eval/results-live.md) without touching `eval/results.md` or `cassettes/`. Replay is deterministic because it reads the committed cassettes, whereas in live mode claim extraction and classification can vary across runs (`deepseek-ai/DeepSeek-V4.1-Flash-1017` via `https://api.river.ai/v1`, 2026-11-06):
-
-| run | UTC | precision | recall | F1 | TP / FP / FN / TN | errors | LLM calls | total time | mean latency / call | tokens (in / out / total) |
-| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| 1 | 2026-11-06T07:03:41+00:00 | 1.000 | 0.833 | 0.909 | 15 / 0 / 3 / 26 | 4 | 69 | 160.75s | 1.976s | 111527 / 8034 / 119561 |
-| 2 | 2026-11-06T07:06:32+00:00 | 1.000 | 0.833 | 0.909 | 15 / 0 / 3 / 26 | 4 | 69 | 241.20s | 3.142s | 111527 / 8173 / 119700 |
-| 3 | 2026-11-06T07:10:45+00:00 | 1.000 | 0.833 | 0.909 | 15 / 0 / 3 / 26 | 4 | 69 | 214.02s | 2.651s | 111529 / 8036 / 119565 |
-| **Mean** | — | **1.000** | **0.833** | **0.909** | 15.0 / 0.0 / 3.0 / 26.0 | 4.0 | 69.0 | 205.32s | 2.589s | 111528 / 8081 / 119609 |
+`uv run splitbrain eval --mode live` writes [`eval/results-live.md`](eval/results-live.md) without touching replay results or cassettes. Replay is deterministic; live extraction and classification can vary. Three historical 44-pair live runs from 2026-11-06, before the final guard/matcher configuration, averaged **1.000 / 0.833 / 0.909** using DeepSeek V4.1 Flash via River. Their timings, token counts and errors remain in that report. Final-configuration live measurements on v2/v3 are below.
 
 ### Unseen cases (v2)
 
-The [100-pair v2 dataset](eval/README-v2.md) exposed commitments the original prefilter missed. We used **v001-v050 to develop the broader prefilter**, so that half is no longer unseen. Reserve v051-v100 contains no contradictions and cannot measure recall on unseen contradictions. Labels stayed fixed.
+The [100-pair v2 dataset](eval/README-v2.md) has been used to develop the prefilter, classifier guard and matcher: **it is development data now**. Its historical reserve v051-v100 contains no contradictions, so it cannot establish recall on unseen contradictions. Labels stayed fixed.
 
-| prefilter | mean precision | mean recall | mean F1 |
-| --- | --- | --- | --- |
-| Original | 0.927 | 0.600 | 0.728 |
-| Generalized | 0.849 | 0.857 | 0.853 |
+Means of three live runs per configuration (`deepseek-ai/DeepSeek-V4.1-Flash-1017` via River):
 
-These are means of three live runs per version. More pairs now reach the classifier: recall improves, but **precision falls to 0.849** as more classifier errors surface. The [full report](eval/results-v2-live.md) preserves both versions' runs and errors; [validation details](eval/prefilter-validation.md) document how the prefilter was developed and checked.
+The first two rows use the original matcher without the classifier guard.
+
+| Configuration | Precision | Recall | F1 | Label errors/run |
+| --- | --- | --- | --- | --- |
+| Original prefilter | 0.927 | 0.600 | 0.728 | 42.3 |
+| Broader prefilter | 0.849 | 0.857 | 0.853 | 24.3 |
+| Prefilter + classifier guard, original matcher | 0.989 | 0.857 | 0.918 | 21.0 |
+| Prefilter + new matcher, **without guard** | 0.849 | 0.857 | 0.853 | 19.0 |
+| **Final: prefilter + classifier guard + matcher** | **0.968** | **0.857** | **0.909** | **15.0** |
+
+The classifier guard in [classifier_guard.py](src/splitbrain/core/classifier_guard.py) handles explicit revisions and approved scoped exceptions; [matcher.py](src/splitbrain/core/matcher.py) uses topic evidence beyond exact `subject_key` equality. The final runs have one false alarm and five missed contradictions each, with three matching-stage label errors. The [full report](eval/results-v2-live.md) preserves every configuration and error; the matcher-only experiment is not the final configuration.
 
 ### Blind cases (v3)
 
@@ -255,12 +255,13 @@ A separate chat wrote [60 blind cases](eval/README-v3.md) without inspecting the
 
 Means of three live runs per version, using the same `deepseek-ai/DeepSeek-V4.1-Flash-1017` model via River:
 
-| prefilter | mean precision | mean recall | mean F1 |
-| --- | --- | --- | --- |
-| [Original (`f43f3e3`)](eval/results-v3-live-before-prefilter.md) | 1.000 | 0.633 | 0.775 |
-| [Generalized](eval/results-v3-live.md) | 1.000 | 0.900 | 0.947 |
+| Configuration / report | Precision | Recall | F1 | Label errors/run |
+| --- | --- | --- | --- | --- |
+| [Original prefilter](eval/results-v3-live-before-prefilter.md), original matcher, no guard | 1.000 | 0.633 | 0.775 | 20.3 |
+| [Broader prefilter](eval/results-v3-live.md), original matcher, no guard | 1.000 | 0.900 | 0.947 | 9.0 |
+| [**Final: prefilter + classifier guard + matcher**](eval/results-v3-live-final.md) | **1.000** | **0.900** | **0.947** | **4.0** |
 
-Each new run misses w023 (a 12-hour/1,440-minute conversion error in the classifier) and w057 (the prefilter misses irreversible-deletion wording). The other seven label errors are w014/w058 (prefiltered updates) and w002/w007/w031/w043/w059 (compatible pairs rejected by the matcher as different subjects).
+An intermediate prefilter + guard check also retained **1.000 / 0.900 / 0.947** in three runs. The final configuration keeps those contradiction metrics while reducing label errors from nine to four per run. It still misses w023 (unit conversion) and w057 (prefilter wording); w014/w058 are updates stopped by the prefilter. The five compatible pairs previously rejected by matching are classified correctly in the final runs. The [final report](eval/results-v3-live-final.md) includes the intermediate check and remaining errors.
 
 ## What we found in Switch 0.31.0
 
@@ -289,17 +290,17 @@ Honest scope of the demo:
 - **Confirmation grammar is deterministic English/Spanish.** Recognized short confirmations reject conditional, deferred or uncertain language; other languages and novel qualifiers are not semantically interpreted. A reply with no usable timestamp or proposal thread must explicitly name the conflict and current version. Automatic startup recovery requires versioned snapshots; when explicitly adopting a legacy OPEN document, owners must post a new `decision:` proposal. Legacy DECIDED records stay closed, but resending an unfinished decision requires an exact ISO timestamp, which old display-only records lack.
 - **Correction recovery needs readable thread history and one Sentinel writer.** Pending deliveries are checked against Switch's latest 200 context threads; if the origin thread is absent, delivery stops with an error and remains pending. Documents contain per-thread receipts, but Switch has no atomic chat-post/document transaction: two simultaneous Sentinel processes are outside this guarantee. Each Arbiter owns its recovery snapshot and the Sentinel owns the correction journal, so takeover does not require editing another agent's document.
 - **Replay mode is recorded data.** With no `SPLITBRAIN_LLM_API_KEY`, `demo` and `eval` replay cassettes recorded with `deepseek-ai/DeepSeek-V4.1-Flash-1017` via River AI (`https://api.river.ai/v1`, `eval/results.md`). A live run defaults to `tencent/hy4` on `https://openrouter.ai/api/v1` (`src/splitbrain/config.py`); any OpenAI-compatible endpoint works through `SPLITBRAIN_LLM_BASE_URL` / `SPLITBRAIN_LLM_MODEL` / `SPLITBRAIN_LLM_API_KEY`. An input without a cassette raises `ReplayMiss`.
-- **Live extraction can vary across runs.** With a live model, extracted fields are not guaranteed to be identical on every call. In our tests, `refunds` sometimes came back with `subject_key="approval-threshold"` instead of `"refunds"`, so the matcher did not form the pair. Replay mode is deterministic, which is why `eval` uses it by default and `demo` uses it whenever no API key is set.
+- **Live extraction can vary across runs.** Earlier live `refunds` runs sometimes extracted `subject_key="approval-threshold"` instead of `"refunds"`. The matcher now uses topic evidence beyond exact keys, and unit tests cover these variants. Extraction can still omit claims or change scope/topic, and classification can vary; this does not establish reliability across all live `refunds` runs. Replay remains deterministic.
 - **Fixture evidence.** `--offline` uses `seed/github_fixture.json`, recorded from the public demo repo with `scripts/record_github_fixture.py`, instead of live GitHub REST. A live network failure raises `SplitbrainEvidenceError` inside the provider and is retried by the Verifier; it never falls back silently.
 - **Evidence relevance is value-matching, not text comprehension.** `issue_is_relevant` (`src/splitbrain/evidence/github.py`) checks whether an open issue's title, body or milestone timeline mentions a concrete value extracted from either claim (amounts/numbers with units, quarters, or ISO dates plus their English month/day and quarter), not what the issue says about that value — so an issue on the same topic could still match if it mentions the disputed number or date for a different reason.
-- **Customer-authorized exceptions are not checked against a global policy.** We compare the two claims' values and phases, but we do not yet verify whether a global policy authorizes an exception for one customer.
+- **Explicitly approved exceptions are not independently verified.** The classifier guard can suppress a contradiction when the message explicitly reports an approved/signed exception with a concrete, compatible scope. It recognizes wording; it does not authenticate the approval or check an external policy. Cases outside its rules still depend on the model.
 - **Scenario evidence is a hackathon fixture.** The two public announcement pages have no GitHub issue; `seed/scenario_evidence.json` holds explicitly labelled paraphrases, enabled only by `SPLITBRAIN_SCENARIO_EVIDENCE=hackathon`, with `scenario-fixture:` identifiers instead of invented URLs and a `[DEGRADED]` banner.
 - **The demo runs on a local Mattermost** brought up by the `collab` compose profile on one machine. We did not run Slack/Discord/Teams bridges; the bridge is Switch's, but that path is unverified here.
 - **Switch tasks are unused.** Switch 0.31.0 lists `delegate_task` and the other task operations in its operation registry but marks them not ready for use, so this repo never calls them; agents coordinate with `post_message` and `send_targeted_message` (`src/splitbrain/switch/client.py`).
 - **A room only convenes people from the same chat app.** Rooms are bridged to one bridge (`bridge_id` in `get_room_detail`); the demo's people are all Mattermost users on the same team.
 - **Switch is pinned to 0.31.0** (`deploy/.env.example`, `src/splitbrain/config.py`). `Settings.load` refuses any other `SWITCH_VERSION` instead of guessing.
 - **No destructive Switch operations exist** in this repo, by design: there is no delete of rooms, roles, references or documents. A `down --wipe` is the way to get a clean stack, and old room names can survive as duplicates if you create rooms by hand.
-- **Generalization varies by dataset.** The broader prefilter improves recall but exposes more classifier errors on [v2](#unseen-cases-v2), where precision falls to 0.849. The independent [blind v3](#blind-cases-v3) reaches 1.000 precision / 0.900 recall, yet each run still misses two contradictions and mislabels seven other pairs. These are small, synthetic datasets; the original replay still misses two global-vs-customer contradictions.
+- **Generalization varies by dataset.** v2 is development data; v3 is a small independent synthetic set. Each final v3 run still has four label errors: two missed contradictions (including a unit-conversion error) and two filtered updates. The 44-pair replay still misses two global-vs-customer contradictions. These measurements do not establish production accuracy.
 
 ## Troubleshooting
 
