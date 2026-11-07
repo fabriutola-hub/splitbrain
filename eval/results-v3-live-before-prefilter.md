@@ -1,6 +1,6 @@
 # Splitbrain — live brain evaluation
 
-This report uses the original prefilter from commit `f43f3e3`, before generalization. Compare the [generalized prefilter results](results-v3-live.md) on the same frozen v3 dataset.
+Configuration: original prefilter from `f43f3e3`, original matcher, no classifier guard. This is the historical baseline on the frozen v3 dataset. Compare the [broader prefilter only](results-v3-live.md) and the [final prefilter + classifier guard + matcher](results-v3-live-final.md); those are separate configurations.
 
 - Latest run (UTC): 2026-11-06T20:33:52+00:00
 - LLM mode: `live`
