@@ -290,6 +290,7 @@ def _same_topic(new: Claim, stored: Claim) -> bool:
     stored_value = _tokens(stored.value) - shared_scope
     new_text = _tokens(new.text) - shared_scope
     stored_text = _tokens(stored.text) - shared_scope
+    exact_scope = new.scope_key == stored.scope_key or "*" in (new.scope_key, stored.scope_key)
 
     shared_key = _specific(new_key) & _specific(stored_key)
     if len(shared_key) >= 2:
@@ -316,7 +317,12 @@ def _same_topic(new: Claim, stored: Claim) -> bool:
         stored_key | stored_subject | stored_value | stored_text
     )
     if shared_any:
-        return True
+        if exact_scope:
+            return True
+        # A finer scope (one site of a customer) is weak evidence on its own:
+        # require the shared word to name the subject, not just to appear in prose.
+        if _specific(new_key | new_subject) & _specific(stored_key | stored_subject):
+            return True
 
     if _numbers(new.text) & _numbers(stored.text):
         return True
