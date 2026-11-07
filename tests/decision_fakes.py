@@ -3,12 +3,13 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from contextlib import asynccontextmanager
 from copy import deepcopy
 from dataclasses import dataclass, field
 from typing import Any
 
-from splitbrain.switch.client import SwitchOpError
+from splitbrain.switch.client import MISSING_ROOM_CONTEXT, SwitchOpError
 
 
 @dataclass
@@ -58,6 +59,8 @@ class FakeSwitch:
         self.calls: list[tuple[str, dict[str, Any]]] = []
         self.connected_room = ""
         self.lock = asyncio.Lock()
+        self.missing_room_context = 0
+        self.load_error: SwitchOpError | None = None
         self.fail_before_room: str | None = None
         self.fail_after_room: str | None = None
         self.fail_next_update = False
@@ -65,9 +68,13 @@ class FakeSwitch:
         self.fail_targeted_after_send = False
 
     @asynccontextmanager
-    async def act_in(self, room_id: str):
+    async def connect_in(self, room_id: str):
         async with self.lock:
-            await self.op("connect_to_room", room_id=room_id)
+            yield await self.op("connect_to_room", room_id=room_id)
+
+    @asynccontextmanager
+    async def act_in(self, room_id: str):
+        async with self.connect_in(room_id):
             yield self
 
     async def op(self, name: str, /, **args: Any) -> Any:
@@ -93,6 +100,11 @@ class FakeSwitch:
                 "linked_rooms": [],
             }
         if name == "load_internal_documents":
+            if self.load_error is not None:
+                raise self.load_error
+            if self.missing_room_context > 0:
+                self.missing_room_context -= 1
+                raise SwitchOpError(name, 400, json.dumps({"detail": MISSING_ROOM_CONTEXT}))
             return [deepcopy(self.state.documents[key]) for key in args["ids"]]
         if name == "create_room_document":
             ident = f"doc-{len(self.state.documents) + 1}"

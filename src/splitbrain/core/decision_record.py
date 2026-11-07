@@ -6,21 +6,19 @@ editing another agent's document. The human record stays readable without JSON.
 
 from __future__ import annotations
 
-import json
 import logging
 from dataclasses import dataclass
 from typing import Any, Literal
 
 from pydantic import BaseModel, Field, model_validator
 
-from ..switch.client import SwitchAgent, SwitchOpError
+from ..switch.client import SwitchAgent, SwitchOpError, lost_room_context
 from .decision import DecisionMachine, DecisionSnapshot, DecisionState
 from .protocol import CandidatePacket, DecidedPacket, OriginRef
 
 STATE_PREFIX = "\n\nSplitbrain state: "
 PROGRESS_PREFIX = "\n\nSplitbrain corrections: "
 CONTEXT_LIMIT = 200
-MISSING_ROOM_CONTEXT = "Not connected to a room. Call connect_to_room first."
 
 logger = logging.getLogger(__name__)
 
@@ -124,17 +122,11 @@ def render_record(content: str, state: DecisionRecord) -> str:
 
 
 async def _load_documents(agent: SwitchAgent, room_id: str, ids: list[str]) -> Any:
-    """Read under the caller's act_in lock; reconnect once for the known context loss."""
+    """Read under the caller's room claim; reconnect once for the known context loss."""
     try:
         return await agent.op("load_internal_documents", ids=ids)
     except SwitchOpError as exc:
-        if exc.op != "load_internal_documents" or exc.status != 400:
-            raise
-        try:
-            body = json.loads(exc.body)
-        except json.JSONDecodeError:
-            raise exc from None
-        if not isinstance(body, dict) or body.get("detail") != MISSING_ROOM_CONTEXT:
+        if not lost_room_context(exc):
             raise
         logger.warning(
             "Switch lost room context for %s while loading documents; "
@@ -145,20 +137,22 @@ async def _load_documents(agent: SwitchAgent, room_id: str, ids: list[str]) -> A
         return await agent.op("load_internal_documents", ids=ids)
 
 
-async def load_decision_records(
-    agent: SwitchAgent, room_id: str, candidate_id: str
+def _decision_document_ids(joined: dict[str, Any], candidate_id: str) -> list[str]:
+    base = f"{candidate_id.upper()} decision record"
+    return [
+        str(doc["id"])
+        for doc in joined.get("documents") or []
+        if doc.get("id")
+        and (doc.get("name") == base or str(doc.get("name", "")).startswith(base + " ("))
+    ]
+
+
+async def read_decision_records(
+    agent: SwitchAgent, room_id: str, candidate_id: str, joined: dict[str, Any]
 ) -> tuple[list[StoredDecision], list[dict[str, Any]]]:
-    async with agent.act_in(room_id):
-        joined = await agent.op("connect_to_room", room_id=room_id)
-        documents = joined.get("documents") or []
-        base = f"{candidate_id.upper()} decision record"
-        ids = [
-            str(doc["id"])
-            for doc in documents
-            if doc.get("id")
-            and (doc.get("name") == base or str(doc.get("name", "")).startswith(base + " ("))
-        ]
-        loaded = await _load_documents(agent, room_id, ids) if ids else []
+    """Read the records while the caller already holds the room claim in `joined`."""
+    ids = _decision_document_ids(joined, candidate_id)
+    loaded = await _load_documents(agent, room_id, ids) if ids else []
     entries = loaded if isinstance(loaded, list) else loaded.get("documents", [])
     if len(entries) != len(ids):
         raise ValueError("A listed decision document could not be loaded; refusing to reopen it")
@@ -174,6 +168,14 @@ async def load_decision_records(
             raise ValueError("Decision document belongs to another conflict")
         records.append(StoredDecision(str(entry.get("id") or ids[index]), content, state))
     return records, joined.get("linked_rooms") or []
+
+
+async def load_decision_records(
+    agent: SwitchAgent, room_id: str, candidate_id: str
+) -> tuple[list[StoredDecision], list[dict[str, Any]]]:
+    async with agent.act_in(room_id):
+        joined = await agent.op("connect_to_room", room_id=room_id)
+        return await read_decision_records(agent, room_id, candidate_id, joined)
 
 
 def latest_record(records: list[StoredDecision]) -> StoredDecision | None:
@@ -192,22 +194,21 @@ def latest_record(records: list[StoredDecision]) -> StoredDecision | None:
     )
 
 
-async def load_correction_journal(
-    agent: SwitchAgent, room_id: str, candidate_id: str
+async def read_correction_journal(
+    agent: SwitchAgent, room_id: str, candidate_id: str, joined: dict[str, Any]
 ) -> tuple[str, CorrectionJournal | None]:
-    async with agent.act_in(room_id):
-        joined = await agent.op("connect_to_room", room_id=room_id)
-        ids = [
-            str(doc["id"])
-            for doc in joined.get("documents") or []
-            if doc.get("id") and doc.get("name") == f"{candidate_id.upper()} correction progress"
-        ]
-        if not ids:
-            return "", None
-        if len(ids) != 1:
-            raise ValueError("Correction journal is ambiguous")
-        document_id = ids[0]
-        loaded = await _load_documents(agent, room_id, [document_id])
+    """Read the journal while the caller already holds the room claim in `joined`."""
+    ids = [
+        str(doc["id"])
+        for doc in joined.get("documents") or []
+        if doc.get("id") and doc.get("name") == f"{candidate_id.upper()} correction progress"
+    ]
+    if not ids:
+        return "", None
+    if len(ids) != 1:
+        raise ValueError("Correction journal is ambiguous")
+    document_id = ids[0]
+    loaded = await _load_documents(agent, room_id, [document_id])
     entries = loaded if isinstance(loaded, list) else loaded.get("documents", [])
     if len(entries) != 1:
         raise ValueError("Correction journal is missing or ambiguous")
@@ -218,6 +219,14 @@ async def load_correction_journal(
     if journal.decided.candidate_id != candidate_id:
         raise ValueError("Correction journal belongs to another conflict")
     return document_id, journal
+
+
+async def load_correction_journal(
+    agent: SwitchAgent, room_id: str, candidate_id: str
+) -> tuple[str, CorrectionJournal | None]:
+    async with agent.act_in(room_id):
+        joined = await agent.op("connect_to_room", room_id=room_id)
+        return await read_correction_journal(agent, room_id, candidate_id, joined)
 
 
 def message_id(result: dict[str, Any]) -> str:
