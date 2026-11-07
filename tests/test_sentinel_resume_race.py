@@ -22,7 +22,7 @@ from splitbrain.core.decision_record import (
     pending_corrections,
 )
 from splitbrain.core.protocol import DecidedPacket
-from splitbrain.switch.client import SwitchAgent, SwitchOpError
+from splitbrain.switch.client import ROOM_CLAIM_ATTEMPTS, SwitchAgent, SwitchOpError
 from splitbrain.switch.events import MessageFrame
 
 ROOM = "r-conflict"
@@ -191,7 +191,9 @@ async def test_journal_context_loss_during_a_concurrent_claim_reconnects_once(
                 "connect_to_room",
             ]
             assert server.connection_ids == {"race-connection"}
-            assert sum("retrying once" in record.message for record in caplog.records) == 1
+            assert (
+                sum("reconnecting for attempt" in record.message for record in caplog.records) == 1
+            )
         finally:
             await sentinel.aclose()
 
@@ -220,18 +222,21 @@ async def test_other_document_errors_are_not_retried(
         assert not caplog.records
 
 
-async def test_missing_context_is_retried_only_once(
+async def test_document_context_recovery_uses_the_client_attempt_limit(
     journal: CorrectionJournal, caplog: pytest.LogCaptureFixture
 ) -> None:
     server = DocumentServer(journal)
-    server.errors *= 2
+    server.errors *= ROOM_CLAIM_ATTEMPTS
     async with httpx.AsyncClient(transport=httpx.MockTransport(server.handle)) as client:
         agent = SwitchAgent("http://switch.test", "sentinel", "unit-test-key", client=client)
         with pytest.raises(SwitchOpError, match="Not connected to a room"):
             await load_correction_journal(agent, ROOM, journal.decided.candidate_id)
-        assert server.calls.count("load_internal_documents") == 2
-        assert server.calls.count("connect_to_room") == 3
-        assert sum("retrying once" in record.message for record in caplog.records) == 1
+        assert server.calls.count("load_internal_documents") == ROOM_CLAIM_ATTEMPTS
+        assert server.calls.count("connect_to_room") == ROOM_CLAIM_ATTEMPTS + 1
+        assert sum("reconnecting for attempt" in record.message for record in caplog.records) == (
+            ROOM_CLAIM_ATTEMPTS - 1
+        )
+        assert "exhausted after 3 attempts" in caplog.text
 
 
 async def test_decision_record_read_uses_the_same_bounded_context_recovery(

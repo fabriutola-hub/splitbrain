@@ -32,7 +32,9 @@ if TYPE_CHECKING:
 PRIMARY = "splitbrain-arbiter"
 STANDBY = "splitbrain-arbiter-b"
 SENTINEL = "splitbrain-sentinel"
-POLL_S = 0.5
+# Document reads must claim the Sentinel's room; leave the worker time to act
+# between observer claims (Switch's connect_to_room always takes the slot).
+POLL_S = 1.0
 RECOVERY_TIMEOUT_S = 120.0
 DUPLICATE_SETTLE_S = 5.0
 

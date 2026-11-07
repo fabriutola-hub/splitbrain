@@ -213,6 +213,29 @@ async def test_recovery_wait_keeps_polling_until_switch_matches(
     assert result == "standby" and poll.await_count == 2
 
 
+async def test_recovery_wait_leaves_a_second_between_transient_or_stale_observations(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    sleep = AsyncMock()
+    monkeypatch.setattr(recovery_demo.asyncio, "sleep", sleep)
+    poll = AsyncMock(
+        side_effect=[
+            SwitchOpError(
+                "load_internal_documents",
+                400,
+                '{"detail":"Not connected to a room. Call connect_to_room first."}',
+            ),
+            "primary",
+            "standby",
+        ]
+    )
+    result = await recovery_demo.wait_for_observation(
+        demo.AgentGroup([]), "standby", poll, lambda observed: observed == "standby"
+    )
+    assert result == "standby" and poll.await_count == 3
+    assert [entry.args for entry in sleep.await_args_list] == [(1.0,), (1.0,)]
+
+
 async def test_seed_waits_for_takeover_before_posting_the_same_confirmation(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
