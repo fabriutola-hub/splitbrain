@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import random
 import uuid
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
@@ -29,6 +30,24 @@ logger = logging.getLogger(__name__)
 DEFAULT_HEARTBEAT_INTERVAL_S = 2.0
 INITIAL_BACKOFF_S = 0.5
 MAX_BACKOFF_S = 5.0
+ROOM_CLAIM_ATTEMPTS = 3
+ROOM_CLAIM_RETRY_MIN_S = 0.05
+ROOM_CLAIM_RETRY_MAX_S = 0.15
+
+# Switch resolves the connected room before any effect in these operations.
+# Keep this list explicit: new operations need the same upstream safety check.
+# See docs/room-claim-retries.md for the guards and the non-idempotent cases.
+ROOM_CLAIM_RETRY_OPS = frozenset(
+    {
+        "load_internal_documents",
+        "create_room_document",
+        "update_room_document",
+        "post_message",
+        "send_targeted_message",
+        "assume_role",
+        "release_role",
+    }
+)
 
 EventHandler = Callable[[SwitchFrame], Awaitable[None]]
 
@@ -51,7 +70,7 @@ def lost_room_context(exc: SwitchOpError) -> bool:
 
     The claim is connection state, not a property of the agent: another
     connection of the same agent can take the room from this one between two
-    calls, so a read that follows a successful connect can still find none.
+    calls, so an operation that follows a successful connect can still find none.
     """
     if exc.status != 400:
         return False
@@ -114,6 +133,8 @@ class SwitchAgent:
         self._owns_client = client is None
         self._client = client or loopback_client(timeout=httpx.Timeout(10.0, read=None))
         self._room_lock = asyncio.Lock()
+        self._room_owner: asyncio.Task[Any] | None = None
+        self._room_id: str | None = None
         self._last_sequence = 0
         self._heartbeat_interval_s = DEFAULT_HEARTBEAT_INTERVAL_S
         self._pending_gap: GapPayload | None = None
@@ -174,6 +195,44 @@ class SwitchAgent:
     # Room-agnostic ops can omit the connection header: the server rejects a
     # header naming a connection with no open stream (409).
     async def op(self, name: str, /, *, connection: bool = True, **args: Any) -> Any:
+        """Recover only a proven pre-effect refusal in this task's room scope."""
+        room_id = self._room_id
+        if (
+            not connection
+            or name not in ROOM_CLAIM_RETRY_OPS
+            or room_id is None
+            or self._room_owner is not asyncio.current_task()
+        ):
+            return await self._request_op(name, connection=connection, **args)
+
+        for attempt in range(1, ROOM_CLAIM_ATTEMPTS + 1):
+            try:
+                return await self._request_op(name, **args)
+            except SwitchOpError as exc:
+                if not lost_room_context(exc):
+                    raise
+                if attempt == ROOM_CLAIM_ATTEMPTS:
+                    detail = (
+                        f"Room claim recovery for {name!r} in room {room_id!r} "
+                        f"exhausted after {attempt} attempts"
+                    )
+                    exc.add_note(detail)
+                    logger.error("%s", detail)
+                    raise
+                delay = random.uniform(ROOM_CLAIM_RETRY_MIN_S, ROOM_CLAIM_RETRY_MAX_S)
+                logger.warning(
+                    "Switch lost room context for %s during %s; reconnecting for attempt %d/%d",
+                    room_id,
+                    name,
+                    attempt + 1,
+                    ROOM_CLAIM_ATTEMPTS,
+                )
+                await asyncio.sleep(delay)
+                # The caller already holds _room_lock; do not enter act_in again.
+                await self._request_op("connect_to_room", room_id=room_id)
+
+    async def _request_op(self, name: str, /, *, connection: bool = True, **args: Any) -> Any:
+        """Send exactly once. Ambiguous write failures must never be replayed."""
         headers = dict(self._auth_headers)
         if connection:
             headers["X-Switch-Connection-Id"] = self.connection_id
@@ -190,7 +249,14 @@ class SwitchAgent:
     async def connect_in(self, room_id: str) -> AsyncIterator[dict[str, Any]]:
         """Claim the room under the connection lock and return the connect payload."""
         async with self._room_lock:
-            yield await self.op("connect_to_room", room_id=room_id)
+            joined = await self.op("connect_to_room", room_id=room_id)
+            self._room_id = room_id
+            self._room_owner = asyncio.current_task()
+            try:
+                yield joined
+            finally:
+                self._room_owner = None
+                self._room_id = None
 
     @asynccontextmanager
     async def act_in(self, room_id: str) -> AsyncIterator[SwitchAgent]:
