@@ -1,0 +1,38 @@
+{
+  "input": {
+    "claim_a": {
+      "author": "owen",
+      "effective_date": null,
+      "kind": "commitment",
+      "polarity": "affirm",
+      "room": "engineering",
+      "scope": "*",
+      "scope_key": "*",
+      "subject": "mobile app general availability",
+      "subject_key": "mobile-app-ga",
+      "text": "The mobile app reaches general availability in Q1 after the December beta.",
+      "value": "Q1, after the December beta"
+    },
+    "claim_b": {
+      "author": "emma",
+      "effective_date": "2026-12-01",
+      "kind": "commitment",
+      "polarity": "affirm",
+      "room": "marketing",
+      "scope": "selected customers",
+      "scope_key": "selected-customers",
+      "subject": "mobile app beta",
+      "subject_key": "mobile-app-beta",
+      "text": "The mobile app beta opens on December 1 for selected customers.",
+      "value": "opens on 2026-12-01"
+    }
+  },
+  "model": "deepseek-ai/DeepSeek-V4.1-Flash-1017",
+  "output": {
+    "confidence": 0.93,
+    "reason": "A December beta for selected customers and Q1 general availability are two phases of one rollout, so both can hold.",
+    "relation": "compatible"
+  },
+  "recorded_at": "2026-11-06T23:10:26+00:00",
+  "task": "classify"
+}

@@ -1,0 +1,38 @@
+{
+  "input": {
+    "claim_a": {
+      "author": "tomas",
+      "effective_date": null,
+      "kind": "commitment",
+      "polarity": "affirm",
+      "room": "engineering",
+      "scope": "*",
+      "scope_key": "*",
+      "subject": "admin console general availability",
+      "subject_key": "admin-console-ga",
+      "text": "The admin console general availability is planned for Q1.",
+      "value": "planned for Q1"
+    },
+    "claim_b": {
+      "author": "lucia",
+      "effective_date": "2026-12-01",
+      "kind": "commitment",
+      "polarity": "affirm",
+      "room": "sales",
+      "scope": "*",
+      "scope_key": "*",
+      "subject": "admin console beta",
+      "subject_key": "admin-console-beta",
+      "text": "The admin console beta is confirmed for December 1.",
+      "value": "confirmed for 2026-12-01"
+    }
+  },
+  "model": "deepseek-ai/DeepSeek-V4.1-Flash-1017",
+  "output": {
+    "confidence": 0.92,
+    "reason": "A December beta and Q1 general availability are two phases of one rollout, so both can hold.",
+    "relation": "compatible"
+  },
+  "recorded_at": "2026-11-06T23:10:27+00:00",
+  "task": "classify"
+}
