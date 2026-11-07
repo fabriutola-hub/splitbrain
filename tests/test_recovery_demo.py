@@ -11,6 +11,8 @@ from unittest.mock import AsyncMock
 import pytest
 from decision_fakes import FakeSwitch
 from test_decision_integrity import (
+    CONFLICT,
+    ROOM,
     arbiter_for,
     decided_arbiter,
     decision_frame,
@@ -27,6 +29,7 @@ from splitbrain.core.decision_record import (
     CorrectionJournal,
     load_correction_journal,
 )
+from splitbrain.switch.client import SwitchOpError
 
 
 class FakeProcess:
@@ -396,3 +399,94 @@ async def test_recovery_detects_duplicate_results_in_switch(
     observed = await controller.observe()
     with pytest.raises(SplitbrainError, match="Recovery expected"):
         controller._require_complete(observed)
+
+
+async def observer_demo() -> tuple[recovery_demo.RecoveryDemo, FakeSwitch]:
+    """A controller whose observer is a fake Sentinel with a persisted proposal."""
+    arbiter, _, primary_agent = await open_arbiter()
+    await propose(arbiter)
+    observer = FakeSwitch("splitbrain-sentinel", primary_agent.state)
+    state = bootstrap.BootstrapState(
+        rooms={
+            "splitbrain-ops": bootstrap.RoomState(room_id="r-ops", channel_type="channel_private")
+        }
+    )
+    controller = recovery_demo.RecoveryDemo(
+        SimpleNamespace(),
+        state,
+        demo.AgentGroup([]),
+        observer,
+        Path("."),
+        {},
+        seed.SeedDecision(
+            propose={"as": "maria", "text": "decision: SSO in Q1"},
+            confirm={"as": "tomas", "text": "confirm"},
+        ),
+    )
+    controller.room_id = ROOM
+    controller.candidate_id = CONFLICT
+    return controller, observer
+
+
+@pytest.mark.parametrize("failures", [1, 2, 4])
+async def test_recovery_wait_treats_a_lost_room_claim_as_not_observed_yet(
+    failures: int, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(recovery_demo, "POLL_S", 0)
+    controller, observer = await observer_demo()
+    observer.missing_room_context = failures
+    observed = await recovery_demo.wait_for_observation(
+        demo.AgentGroup([]),
+        "the decision record",
+        controller.observe,
+        lambda item: item.record is not None,
+        timeout_s=5,
+    )
+    assert observed.record is not None
+    assert observer.missing_room_context == 0
+
+
+async def test_recovery_wait_fails_clearly_when_switch_never_regains_the_room(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(recovery_demo, "POLL_S", 0)
+    controller, observer = await observer_demo()
+    observer.missing_room_context = 10_000
+    with pytest.raises(SplitbrainError) as error:
+        await recovery_demo.wait_for_observation(
+            demo.AgentGroup([]),
+            "the decision record",
+            controller.observe,
+            lambda item: item.record is not None,
+            timeout_s=0,
+        )
+    message = str(error.value)
+    assert "expected the decision record" in message
+    assert "Not connected to a room" in message
+    assert "transient Switch read error" in message
+
+
+async def test_recovery_wait_does_not_hide_a_permanent_switch_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(recovery_demo, "POLL_S", 0)
+    controller, observer = await observer_demo()
+    observer.load_error = SwitchOpError(
+        "load_internal_documents", 403, '{"detail": "agent is not a member"}'
+    )
+    with pytest.raises(SwitchOpError) as error:
+        await recovery_demo.wait_for_observation(
+            demo.AgentGroup([]),
+            "the decision record",
+            controller.observe,
+            lambda item: item.record is not None,
+            timeout_s=5,
+        )
+    assert error.value.status == 403
+
+
+async def test_observe_claims_the_conflict_room_once_per_poll() -> None:
+    controller, observer = await observer_demo()
+    observer.calls.clear()
+    await controller.observe()
+    assert [name for name, _ in observer.calls].count("connect_to_room") == 1

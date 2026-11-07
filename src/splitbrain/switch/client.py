@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import uuid
 from collections.abc import AsyncIterator, Awaitable, Callable
@@ -40,6 +41,39 @@ class SwitchOpError(RuntimeError):
         self.status = status
         self.body = body
         super().__init__(f"Switch operation {op!r} failed with HTTP {status}: {body}")
+
+
+MISSING_ROOM_CONTEXT = "Not connected to a room. Call connect_to_room first."
+
+
+def lost_room_context(exc: SwitchOpError) -> bool:
+    """True when Switch refused a room-scoped call because the claim is gone.
+
+    The claim is connection state, not a property of the agent: another
+    connection of the same agent can take the room from this one between two
+    calls, so a read that follows a successful connect can still find none.
+    """
+    if exc.status != 400:
+        return False
+    try:
+        detail = json.loads(exc.body)
+    except json.JSONDecodeError:
+        return False
+    return isinstance(detail, dict) and detail.get("detail") == MISSING_ROOM_CONTEXT
+
+
+def transient_switch_error(exc: BaseException) -> bool:
+    """True for a read failure a later attempt may survive.
+
+    A lost room claim, a connection the server no longer holds, a dropped
+    socket or a server error is transient. A rejected argument, a missing
+    document or a permission error is not, and must stay visible.
+    """
+    if isinstance(exc, httpx.TransportError):
+        return True
+    if isinstance(exc, SwitchOpError):
+        return lost_room_context(exc) or exc.status == 409 or exc.status >= 500
+    return False
 
 
 class RegistrationResult(BaseModel):
@@ -153,10 +187,15 @@ class SwitchAgent:
         return OpResult.model_validate(response.json()).result
 
     @asynccontextmanager
+    async def connect_in(self, room_id: str) -> AsyncIterator[dict[str, Any]]:
+        """Claim the room under the connection lock and return the connect payload."""
+        async with self._room_lock:
+            yield await self.op("connect_to_room", room_id=room_id)
+
+    @asynccontextmanager
     async def act_in(self, room_id: str) -> AsyncIterator[SwitchAgent]:
         """Serialize connect_to_room + the operation: the claim is connection state."""
-        async with self._room_lock:
-            await self.op("connect_to_room", room_id=room_id)
+        async with self.connect_in(room_id):
             yield self
 
     async def post(self, room_id: str, body: str, thread_id: str | None = None) -> Any:

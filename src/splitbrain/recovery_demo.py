@@ -8,6 +8,7 @@ from collections.abc import Awaitable, Callable
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+import httpx
 from pydantic import BaseModel
 
 from . import bootstrap, demo_faults, seed
@@ -17,11 +18,11 @@ from .core.decision_record import (
     CorrectionJournal,
     DecisionRecord,
     latest_record,
-    load_correction_journal,
-    load_decision_records,
     message_id,
+    read_correction_journal,
+    read_decision_records,
 )
-from .switch.client import SwitchAgent
+from .switch.client import SwitchAgent, SwitchOpError, transient_switch_error
 from .switch.events import ConnectionStateFrame, SwitchFrame
 from .switch.mattermost import MattermostUser
 
@@ -115,7 +116,18 @@ async def wait_for_observation[T](
     deadline = time.monotonic() + timeout_s
     while True:
         group.check()
-        observed = await poll()
+        try:
+            observed = await poll()
+        except (SwitchOpError, httpx.TransportError) as exc:
+            if not transient_switch_error(exc):
+                raise
+            if time.monotonic() >= deadline:
+                raise SplitbrainError(
+                    f"Recovery expected {description}; observed a transient Switch read "
+                    f"error until the timeout: {exc}"
+                ) from None
+            await asyncio.sleep(POLL_S)
+            continue
         if ready(observed):
             return observed
         if time.monotonic() >= deadline:
@@ -222,14 +234,19 @@ class RecoveryDemo:
             for holder in role.get("held_by") or []
         )
         try:
-            records, _ = await load_decision_records(self.observer, self.room_id, self.candidate_id)
+            async with self.observer.connect_in(self.room_id) as joined:
+                records, _ = await read_decision_records(
+                    self.observer, self.room_id, self.candidate_id, joined
+                )
+                _, journal = await read_correction_journal(
+                    self.observer, self.room_id, self.candidate_id, joined
+                )
         except ValueError as exc:
             raise SplitbrainError(
                 f"Recovery expected valid snapshots for {self.candidate_id}; observed {exc}"
             ) from exc
         selected = latest_record(records)
         record = selected.state if selected else None
-        _, journal = await load_correction_journal(self.observer, self.room_id, self.candidate_id)
         context = await self.observer.op(
             "read_context", room_id=self.room_id, limit=200, connection=False
         )
