@@ -4,9 +4,11 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
 import shutil
 import subprocess
 import time
+from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any
 
@@ -46,6 +48,31 @@ def _run_sync(args: list[str]) -> CommandResult:
     return CommandResult(returncode=proc.returncode, stdout=proc.stdout, stderr=proc.stderr)
 
 
+HOST_PORT_SETTINGS = (
+    "API_HOST_PORT",
+    "MATTERMOST_HOST_PORT",
+    "GATEWAY_HOST_PORT",
+    "POSTGRES_HOST_PORT",
+)
+_UNAVAILABLE_PORT = re.compile(r"ports are not available: exposing port TCP [^\s:]+:(\d+)")
+
+
+def port_conflict_hint(detail: str, values: Mapping[str, str]) -> str:
+    """Name the deploy/.env setting to change when Docker cannot publish a port."""
+    match = _UNAVAILABLE_PORT.search(detail)
+    if match is None:
+        return ""
+    port = match.group(1)
+    names = [name for name in HOST_PORT_SETTINGS if values.get(name, "").strip() == port]
+    setting = names[0] if names else "the matching *_HOST_PORT setting"
+    return (
+        f"\nHint: host port {port} is in use or reserved by Windows (Hyper-V/WinNAT). "
+        f"Set {setting} in deploy/.env to a free port (for example 1{port}) and retry; "
+        "`netsh interface ipv4 show excludedportrange protocol=tcp` lists reserved ranges. "
+        "See Troubleshooting in README.md."
+    )
+
+
 async def _docker(args: list[str], settings: Settings) -> str:
     """Run one Docker command and fail loudly, with secrets scrubbed from the output."""
     result = await asyncio.to_thread(_run_sync, args)
@@ -56,6 +83,7 @@ async def _docker(args: list[str], settings: Settings) -> str:
         raise SplitbrainError(
             f"{' '.join(args[:3])} failed with exit code {result.returncode}"
             + (f":\n{detail}" if detail else "")
+            + port_conflict_hint(detail, settings.values)
         )
     return stdout
 

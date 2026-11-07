@@ -122,3 +122,40 @@ async def test_up_respects_an_existing_postgres_host_port(
     assert calls[0][-2:] == ["up", "-d"]
     assert str(paths.env_file) in calls[0]
     assert "Created deploy/.env" not in capsys.readouterr().out
+
+
+DOCKER_PORT_ERROR = (
+    "Error response from daemon: ports are not available: exposing port TCP "
+    "127.0.0.1:8065 -> 127.0.0.1:0: listen tcp4 127.0.0.1:8065: bind: An attempt was "
+    "made to access a socket in a way forbidden by its access permissions."
+)
+
+
+def test_port_conflict_hint_names_the_setting_to_change() -> None:
+    hint = stack.port_conflict_hint(
+        DOCKER_PORT_ERROR, {"API_HOST_PORT": "8000", "MATTERMOST_HOST_PORT": "8065"}
+    )
+    assert "MATTERMOST_HOST_PORT" in hint
+    assert "host port 8065" in hint
+    assert "18065" in hint
+    assert "Troubleshooting" in hint
+
+
+def test_port_conflict_hint_falls_back_when_the_port_is_unknown() -> None:
+    hint = stack.port_conflict_hint(DOCKER_PORT_ERROR, {})
+    assert "the matching *_HOST_PORT setting" in hint
+
+
+def test_port_conflict_hint_is_empty_for_other_errors() -> None:
+    assert stack.port_conflict_hint("no such image: switch:0.31.0", {}) == ""
+
+
+async def test_docker_failure_carries_the_port_hint(
+    settings: Settings, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def failing(args: list[str]) -> stack.CommandResult:
+        return stack.CommandResult(returncode=1, stdout="", stderr=DOCKER_PORT_ERROR)
+
+    monkeypatch.setattr(stack, "_run_sync", failing)
+    with pytest.raises(stack.SplitbrainError, match="MATTERMOST_HOST_PORT in deploy/.env"):
+        await stack._docker(["docker", "compose", "-p", "up"], settings)
