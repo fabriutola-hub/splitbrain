@@ -1,6 +1,6 @@
 # Splitbrain — live brain evaluation
 
-This report uses the generalized prefilter introduced in `7ddd17a`. Compare the [original prefilter (`f43f3e3`)](results-v3-live-before-prefilter.md) on the same frozen v3 dataset.
+Configuration: generalized prefilter introduced in `7ddd17a`, original matcher, no classifier guard. This is the prefilter-only result, not the final configuration. Compare the [original prefilter baseline](results-v3-live-before-prefilter.md) and the [final prefilter + classifier guard + matcher](results-v3-live-final.md) on the same frozen v3 dataset.
 
 - Latest run (UTC): 2026-11-06T20:35:08+00:00
 - LLM mode: `live`
